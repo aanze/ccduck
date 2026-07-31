@@ -158,9 +158,39 @@ function planUsageFiles(env, cfg) {
   return out;
 }
 
+// L'app Claude est distribuée en paquet MSIX : ce que l'on voit sous
+// %APPDATA%\Claude n'est qu'une VUE VIRTUALISÉE, réservée aux processus portant
+// la même identité de paquet. Un shell lancé par une autre application packagée
+// (Windows Terminal, panneau terminal) reçoit sa propre vue et ne voit donc
+// rien — d'où des ENOENT permanents. Le fichier physique, lui, vit sous
+// %LOCALAPPDATA%\Packages\Claude_*\LocalCache\Roaming\Claude et reste lisible
+// depuis n'importe quel shell : c'est le chemin à privilégier.
+let msixCache = null;
+function msixClaudeDirs(env) {
+  if (msixCache) return msixCache;
+  const out = [];
+  const roots = [env.LOCALAPPDATA, path.join(os.homedir(), 'AppData', 'Local')];
+  for (const r of roots) {
+    if (!r) continue;
+    const pkgRoot = path.join(r, 'Packages');
+    let names = [];
+    try { names = fs.readdirSync(pkgRoot); } catch (e) { continue; }
+    for (const n of names) {
+      if (!/claude|anthropic/i.test(n)) continue;
+      out.push(path.join(pkgRoot, n, 'LocalCache', 'Roaming', 'Claude'));
+      out.push(path.join(pkgRoot, n, 'LocalCache', 'Local', 'Claude'));
+    }
+    if (out.length) break;
+  }
+  msixCache = out;
+  return out;
+}
+
 function planUsageDirs(env, cfg) {
   const dirs = [];
   const add = (d) => { if (d && !dirs.includes(d)) dirs.push(d); };
+  // chemin physique MSIX en tête : il fonctionne quel que soit le shell
+  for (const d of msixClaudeDirs(env)) add(d);
   // 1) chemin explicite (config planUsageDir ou variable CCDUCK_CLAUDE_DIR)
   add(env.CCDUCK_CLAUDE_DIR);
   if (cfg && cfg.planUsageDir) add(cfg.planUsageDir);
@@ -787,6 +817,26 @@ class DataStore {
       burnPerMin, burnTokPerMin, projPct,
       day, byFamDay,
       officialAt: off.at,
+      // diagnostic affiché à l'écran quand aucune source ne répond : c'est ce que
+      // CE process voit, pas ce qu'un autre terminal verrait.
+      diag: (off5 || off7) ? null : (() => {
+        const lines = [];
+        for (const p of planUsageFiles(process.env, cfg)) {
+          let st;
+          try {
+            const s = fs.statSync(p);
+            const j = JSON.parse(fs.readFileSync(p, 'utf8'));
+            const l = j.samples && j.samples[j.samples.length - 1];
+            st = l ? Math.round((now - (Number(l.t) || 0)) / 1000) + 's old, ' + s.size + 'B' : 'no sample';
+          } catch (e) { st = String((e && e.code) || 'error'); }
+          lines.push({ path: p, state: st });
+        }
+        const cr = readOAuthCreds(process.env);
+        const tok = !cr ? 'no credentials file'
+          : (cr.expiresAt && cr.expiresAt < now
+            ? 'expired ' + Math.round((now - cr.expiresAt) / 60000) + 'min ago' : 'valid');
+        return { files: lines, token: tok, apiErr: od.lastErr || null };
+      })(),
       officialSrc: (s5 ? s5.src : (s7 ? s7.src : null)) + (ex5 != null || ex7 != null ? '+live' : ''),
       planSeen: !!plan,
       planErr,

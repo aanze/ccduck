@@ -304,6 +304,21 @@ function draw(scr, state) {
   // ---- débit / projection ----
   if (ui.loading) {
     scr.text(1, y, `scanning transcripts… ${ui.loading.done}/${ui.loading.total}`, C.dim);
+  } else if (snap.diag) {
+    // aucune source officielle : on montre ce que CE process voit, ici et maintenant
+    scr.text(1, y, 'no usage source reachable from this process:', C.orange, null, A_BOLD);
+    let dy = y + 1;
+    for (const f of snap.diag.files) {
+      if (dy >= rows - 1) break;
+      const okish = /old,/.test(f.state);
+      scr.text(2, dy, padR(clip(f.state, 18), 19), okish ? C.green : C.red);
+      scr.text(21, dy, clip(f.path, cols - 22), C.dim);
+      dy++;
+    }
+    if (dy < rows - 1) {
+      scr.text(2, dy, 'oauth token: ' + snap.diag.token + (snap.diag.apiErr ? '  ·  api: ' + snap.diag.apiErr : ''), C.dim);
+    }
+    return geoOut(geo);
   } else if (!snap.hasData) {
     scr.text(1, y, 'no Claude Code data found in ~/.claude/projects', C.orange);
   } else {
