@@ -56,7 +56,7 @@ function metersGeometry(snap, cols, cfg) {
   const L = meterLayout(cols);
   let worst = null;
   const tips = snap.meters.map((m, idx) => {
-    const pct = Math.max(0, m.pct);
+    const pct = Math.max(0, m.pct == null ? 0 : m.pct);
     const fill = Math.min(1, pct / 100) * L.barW;
     const tip = L.barX0 + Math.max(0, Math.min(L.barW - 1, Math.floor(fill)));
     let eff = levelOf(pct, cfg);
@@ -75,6 +75,20 @@ function metersGeometry(snap, cols, cfg) {
 
 function drawMeter(scr, y, m, L, cfg, blinkOn, isWorst) {
   const lbl = L.labelW <= 5 ? clip(m.label, 4) : m.label;
+  // pct null = on ne sait pas : barre vide et « — », surtout pas un chiffre inventé
+  if (m.pct == null) {
+    scr.text(1, y, padR(lbl, L.labelW - 1), C.dim);
+    for (let i = 0; i < L.barW; i++) scr.set(L.barX0 + i, y, '·', C.barEmpty);
+    scr.text(L.barX0 + L.barW + 1, y, '  —', C.dim);
+    let x = L.barX0 + L.barW + 6;
+    if (L.figsW) {
+      scr.text(x, y, padR(clip('no official data', L.figsW), L.figsW), C.faint);
+      x += L.figsW + 1;
+    }
+    const rst = m.resetSec != null ? '↺ ' + fmtDur(m.resetSec) : '';
+    scr.text(x, y, padR(clip(rst, L.resetW), L.resetW), C.faint);
+    return;
+  }
   const pct = Math.max(0, m.pct);
   const lblColor = isWorst && pct >= cfg.alert ? pctColor(pct, cfg) : C.text;
   const lblAt = isWorst && pct >= cfg.alert ? A_BOLD : 0;
@@ -316,7 +330,9 @@ function draw(scr, state) {
     const keys = '[q]uit [f]eed [s]edate [r]efresh [m]etric:' + ui.metricLabel + ' [c]table [d]emo' + (ui.paused ? ' ▮▮' : '');
     const bits = [];
     // source réellement retenue : app (fichier local de Claude), api, ou cache VS Code
-    if (snap.officialUsed) bits.push('• src:' + (snap.officialSrc || '?') + (snap.planSeen ? '' : ' (no app file)'));
+    if (snap.officialUsed) bits.push('• src:' + (snap.officialSrc || '?'));
+    else bits.push('no official data — run: ccduck --debug-usage');
+    if (!snap.planSeen) bits.push('app file: ' + (snap.planErr || 'not found'));
     if (snap.meters.some((m) => m.auto)) bits.push('≈ auto (' + cfg.historyDays + 'd)');
     else if (!snap.officialUsed) bits.push('limits: config');
     // l'erreur API n'a d'importance que si les chiffres affichés vieillissent

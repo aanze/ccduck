@@ -83,7 +83,21 @@ async function run(argv) {
   // ---- diagnostic : état persisté + appel forcé à l'endpoint officiel ----
   if (opts.debugUsage) {
     const o = store.official;
-    const { readOAuthCreds } = require('./data');
+    const { readOAuthCreds, readPlanUsage, planUsageDirs } = require('./data');
+    const fsx = require('fs'), pth = require('path');
+    console.log('Claude app usage file (source #1) — candidate paths:');
+    for (const d of planUsageDirs(process.env)) {
+      const f = pth.join(d, 'plan-usage-history.json');
+      let mark = 'missing';
+      try { const st = fsx.statSync(f); mark = 'FOUND (' + st.size + ' bytes, ' + Math.round((Date.now() - st.mtimeMs) / 1000) + 's ago)'; } catch (e) { mark = e.code || 'missing'; }
+      console.log('  ' + mark.padEnd(34) + f);
+    }
+    const pu = readPlanUsage(process.env);
+    console.log('  → result: ' + (pu && pu.at
+      ? 'session ' + Math.round(pu.u5h * 100) + '% / weekly ' + Math.round(pu.u7d * 100) + '%, sampled ' + Math.round((Date.now() - pu.at) / 1000) + 's ago'
+      : 'UNUSABLE (' + ((pu && pu.error) || 'not found') + ')'));
+    console.log('  env: APPDATA=' + (process.env.APPDATA || '(unset)') + '  HOME=' + (process.env.USERPROFILE || process.env.HOME || '(unset)'));
+    console.log();
     const cr = readOAuthCreds(process.env);
     console.log('oauth token: ' + (cr
       ? (cr.expiresAt ? 'expires ' + new Date(cr.expiresAt).toLocaleString()

@@ -145,26 +145,47 @@ function fetchUsage(token, userAgent, timeoutMs) {
 // SOURCE LA PLUS FIABLE : l'app Claude enregistre son propre relevé d'usage toutes
 // les 5 min dans plan-usage-history.json — `fh` = session 5 h, `sd` = hebdo (en %).
 // Aucun token, aucun appel réseau : ni 401 ni 429 possibles.
-function readPlanUsage(env) {
+function planUsageDirs(env) {
   const dirs = [];
-  if (env.APPDATA) dirs.push(path.join(env.APPDATA, 'Claude'));
-  dirs.push(path.join(os.homedir(), 'AppData', 'Roaming', 'Claude'));
-  dirs.push(path.join(os.homedir(), 'Library', 'Application Support', 'Claude'));
-  dirs.push(path.join(os.homedir(), '.config', 'Claude'));
+  const add = (d) => { if (d && !dirs.includes(d)) dirs.push(d); };
+  const roots = [env.APPDATA, env.LOCALAPPDATA];
+  let home = null;
+  try { home = os.homedir(); } catch (e) { /* ignore */ }
+  for (const h of [home, env.USERPROFILE, env.HOME]) {
+    if (!h) continue;
+    roots.push(path.join(h, 'AppData', 'Roaming'), path.join(h, 'AppData', 'Local'));
+  }
+  for (const r of roots) if (r) { add(path.join(r, 'Claude')); add(path.join(r, 'Claude', 'Claude')); }
+  for (const h of [home, env.USERPROFILE, env.HOME]) {
+    if (!h) continue;
+    add(path.join(h, 'Library', 'Application Support', 'Claude'));
+    add(path.join(h, '.config', 'Claude'));
+  }
+  return dirs;
+}
+
+function readPlanUsage(env) {
+  const dirs = planUsageDirs(env);
+  let why = null;
   for (const d of dirs) {
+    const p = path.join(d, 'plan-usage-history.json');
     try {
-      const j = JSON.parse(fs.readFileSync(path.join(d, 'plan-usage-history.json'), 'utf8'));
+      const j = JSON.parse(fs.readFileSync(p, 'utf8'));
       const arr = Array.isArray(j.samples) ? j.samples : null;
-      if (!arr || !arr.length) continue;
+      if (!arr || !arr.length) { why = why || 'empty'; continue; }
       const last = arr[arr.length - 1];
-      if (!last || !last.u) continue;
+      if (!last || !last.u) { why = why || 'no sample'; continue; }
       const u5 = typeof last.u.fh === 'number' ? last.u.fh / 100 : null;
       const u7 = typeof last.u.sd === 'number' ? last.u.sd / 100 : null;
-      if (u5 == null && u7 == null) continue;
-      return { u5h: u5, u7d: u7, at: Number(last.t) || 0 };
-    } catch (e) { /* app non installée ici */ }
+      if (u5 == null && u7 == null) { why = why || 'no fh/sd'; continue; }
+      return { u5h: u5, u7d: u7, at: Number(last.t) || 0, path: p };
+    } catch (e) {
+      // ENOENT = app pas installée à cet emplacement, on continue ; le reste
+      // (droits, JSON tronqué pendant une écriture) mérite d'être signalé.
+      if (e && e.code !== 'ENOENT') why = String(e.code || 'parse error');
+    }
   }
-  return null;
+  return why ? { error: why } : null;
 }
 
 // Repli : cache local écrit par l'extension VS Code / la statusline (parfois périmé).
@@ -469,7 +490,9 @@ class DataStore {
     // heures. Par fenêtre, la donnée la plus fraîche gagne ; jamais de mélange.
     const od = this.official;
     const cacheU = readOfficialUsage(process.env);
-    const plan = readPlanUsage(process.env);
+    const planRaw = readPlanUsage(process.env);
+    const plan = planRaw && planRaw.at ? planRaw : null;
+    const planErr = planRaw && planRaw.error ? planRaw.error : (plan ? null : 'not found');
     // Un relevé est valable si sa fenêtre court encore, ou s'il est très récent
     // (les échantillons de l'app n'embarquent pas l'heure de reset).
     // Règle dure : un relevé de plus de 15 min n'est PLUS considéré comme officiel.
@@ -619,6 +642,13 @@ class DataStore {
         resetSec, resetText,
       });
     };
+    // RÈGLE : sans relevé officiel frais, on n'invente RIEN — pct = null, la jauge
+    // affiche « — ». Un pourcentage calculé sur des pics historiques n'a aucun
+    // rapport avec les quotas réels et induit en erreur.
+    const unknown = (key, label, used, tokens, resetSec) => meters.push({
+      key, label, used, tokens, limit: null, auto: false, official: false,
+      pct: null, resetSec, resetText: null,
+    });
     const estBlockVal = active ? active.sum.val : 0;
     const estBlockCost = active ? active.sum.cost : 0;
     const estBlockTok = active ? active.sum.i + active.sum.o + active.sum.cw + active.sum.cr : 0;
@@ -626,18 +656,14 @@ class DataStore {
       push('session', 'SESSION 5h', estBlockVal, estBlockCost, estBlockTok, null,
         reset5 ? (reset5 - now) / 1000 : null, null, { pct: off.u5h * 100 });
     } else {
-      push('session', 'SESSION 5h', estBlockVal, estBlockCost, estBlockTok,
-        lim('session', maxBlock, estBlockCost),
-        active ? (active.end - now) / 1000 : null, active ? null : 'idle');
+      unknown('session', 'SESSION 5h', estBlockVal, estBlockTok, reset5 ? (reset5 - now) / 1000 : null);
     }
     const weekTok = week.i + week.o + week.cw + week.cr;
     if (off7) {
       push('week', 'WEEK', week.val, week.cost, weekTok, null,
         reset7 ? (reset7 - now) / 1000 : null, null, { pct: off.u7d * 100 });
     } else {
-      push('week', 'WEEK', week.val, week.cost, weekTok,
-        lim('week', maxWeek, week.cost),
-        weekReset ? (weekReset - now) / 1000 : null, weekReset ? null : '7d rolling');
+      unknown('week', 'WEEK', week.val, weekTok, reset7 ? (reset7 - now) / 1000 : null);
     }
     const premTok = premium.i + premium.o + premium.cw + premium.cr;
     if (offPrem) {
@@ -649,20 +675,18 @@ class DataStore {
         resetSec: (offPrem.reset - now) / 1000, resetText: null,
       });
     } else if (off7 && roll.tot > 0) {
-      // Formule cccat, TOUJOURS, avec SES entrées exactes : part de tokens premium
-      // sur fenêtre GLISSANTE 7 j × hebdo officiel ÷ plafond premium (~50 %).
+      // Formule cccat : part de tokens premium sur 7 j glissants × hebdo OFFICIEL
+      // ÷ plafond premium (~50 %). Ancrée sur une valeur officielle, donc légitime.
       const share = cfg.premiumShare > 0 ? cfg.premiumShare : 0.5;
       const pct = Math.min(100, ((roll.prem / roll.tot) * off.u7d / share) * 100);
       meters.push({
         key: 'premium', label: premiumFam.toUpperCase() + ' 7d',
         used: premium.val, tokens: premTok, limit: null, auto: true, official: false,
-        pct, resetSec: weekReset ? (weekReset - now) / 1000 : null, resetText: null,
+        pct, resetSec: reset7 ? (reset7 - now) / 1000 : null, resetText: null,
       });
     } else {
-      // sans hebdo officiel, dernier recours : calibrage sur pics historiques
-      push('premium', premiumFam.toUpperCase() + ' 7d', premium.val, premium.cost, premTok,
-        lim('premium', maxPremium, premium.cost),
-        weekReset ? (weekReset - now) / 1000 : null, weekReset ? null : '7d rolling');
+      unknown('premium', premiumFam.toUpperCase() + ' 7d', premium.val, premTok,
+        reset7 ? (reset7 - now) / 1000 : null);
     }
 
     // Débit et projection de fin de bloc (canoniques en coût, comme les %)
@@ -688,6 +712,7 @@ class DataStore {
       officialAt: off.at,
       officialSrc: s5 ? s5.src : (s7 ? s7.src : null),
       planSeen: !!plan,
+      planErr,
       officialUsed: off5 || off7 || !!offPrem,
       officialErr: od.lastErr,
       officialRetryIn: Math.max(0, od.nextTryAt - now),
@@ -700,4 +725,4 @@ class DataStore {
   }
 }
 
-module.exports = { DataStore, familyOf, entryCost, entryMetric, readOAuthCreds };
+module.exports = { DataStore, familyOf, entryCost, entryMetric, readOAuthCreds, readPlanUsage, planUsageDirs };
