@@ -28,6 +28,7 @@ const DEFAULTS = {
   // Limites par jauge, dans l'unité de la métrique ('auto' = pic historique observé).
   limits: { session: 'auto', day: 'auto', week: 'auto', premium: 'auto' },
   showTable: true,
+  checkUpdates: true,        // vérifie une fois par demi-journée si une version plus récente existe
 };
 
 function configPath() {

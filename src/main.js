@@ -5,6 +5,7 @@ const { Screen, colorMode, term } = require('./ansi');
 const { load } = require('./config');
 const { DataStore } = require('./data');
 const { Duck } = require('./duck');
+const update = require('./update');
 const ui = require('./ui');
 
 const VERSION = require('../package.json').version;
@@ -19,9 +20,11 @@ Usage: ccduck [options]
   --size CxR       force size, e.g. 90x32
   --metric M       cost | total | billable
   --config PATH    config file (default: ~/.ccduck.json)
+  --update         update ccduck now (git pull, or reinstall from the repo)
   --help, --version
 
 Keys  : [q] quit  [f] feed the duck  [s] sleeping pill (5 min)  [r] refresh  [m] metric  [c] table  [d] demo  [p] pause
+        [u] install the update when one is offered in the header
 Config: ~/.ccduck.json (limits, thresholds, weekly reset… see README)`;
 
 function parseArgs(argv) {
@@ -39,6 +42,7 @@ function parseArgs(argv) {
     else if (a === '--config') o.config = eat();
     else if (a === '--no-color') o.noColor = true;
     else if (a === '--debug-usage') o.debugUsage = true;
+    else if (a === '--update') o.update = true;
     else if (a === '--mirror') o.mirror = true;
     else if (a === '--mirror-watch') { o.mirror = true; o.mirrorWatch = true; }
     else o._.push(a);
@@ -65,6 +69,8 @@ async function run(argv) {
   const opts = parseArgs(argv);
   if (opts.help) { console.log(HELP); return; }
   if (opts.version) { console.log('ccduck ' + VERSION); return; }
+
+  if (opts.update) { process.exit(update.runUpdate() ? 0 : 1); }
 
   const cfg = load(opts.config);
   let metric = METRICS.includes(opts.metric) ? opts.metric : (METRICS.includes(cfg.metric) ? cfg.metric : 'cost');
@@ -159,7 +165,11 @@ async function run(argv) {
     ui.draw(screen, {
       snap, cfg, tSec: 1.3, blinkOn: true,
       duckInfo: duck.renderInfo(), bubble: duck.bubble,
-      ui: { demoLabel: opts.demo != null ? 'DEMO' : '', loading: null, paused: false, showTable: true, metricLabel: METRIC_LABELS[metric], version: VERSION },
+      ui: {
+        demoLabel: opts.demo != null ? 'DEMO' : '', loading: null, paused: false, showTable: true,
+        metricLabel: METRIC_LABELS[metric], version: VERSION,
+        update: cfg.checkUpdates === false ? null : update.cached(VERSION), // cache seul : pas de réseau ici
+      },
     });
     process.stdout.write(screen.renderLines() + '\n');
     return;
@@ -207,6 +217,16 @@ async function run(argv) {
   };
   pokeOfficial(true);
 
+  // Mise à jour : une vérification au lancement (cache de 6 h côté update.js),
+  // jamais bloquante, et l'offre s'affiche dans l'en-tête — c'est la touche u
+  // qui décide, rien ne s'installe tout seul.
+  let updateTo = cfg.checkUpdates === false ? null : update.cached(VERSION);
+  const pokeUpdate = (force) => {
+    if (cfg.checkUpdates === false) return;
+    update.check(VERSION, force).then((v) => { updateTo = v; }).catch(() => {});
+  };
+  pokeUpdate(false);
+
   const cleanup = () => {
     if (quitting) return;
     quitting = true;
@@ -243,6 +263,12 @@ async function run(argv) {
       else if (k === 'f' || k === 'F') { duck.feed(); }
       else if (k === 's' || k === 'S') { duck.dropPill(); }
       else if (k === 'c' || k === 'C') { showTable = !showTable; }
+      else if (k === 'u' || k === 'U') {
+        // on rend la main au terminal avant de lancer git/npm : leur sortie
+        // doit être lisible, et le process s'arrête ensuite de toute façon
+        if (updateTo) { cleanup(); process.exit(update.runUpdate() ? 0 : 1); }
+        else pokeUpdate(true);
+      }
       else if (k === 'p' || k === 'P' || k === ' ') { paused = !paused; }
       else if (k === 'd' || k === 'D') {
         demo = demo == null ? 75 : demo === 75 ? 93 : demo === 93 ? 'sweep' : null;
@@ -290,6 +316,7 @@ async function run(argv) {
       ui: {
         demoLabel: demo == null ? '' : 'DEMO' + (typeof demo === 'number' ? ' ' + demo + '%' : ''),
         loading, paused, showTable, metricLabel: METRIC_LABELS[metric], version: VERSION,
+        update: updateTo,
       },
     });
     const frame = screen.render();

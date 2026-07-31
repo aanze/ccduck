@@ -286,6 +286,12 @@ function draw(scr, state) {
   const ver = 'v' + (ui.version || '?');
   scr.text(10, y, ver, C.faint);
   let hx = 10 + ver.length + 1; // espace avant le sous-titre
+  // mise à jour disponible : offerte, jamais imposée (touche u)
+  if (ui.update) {
+    const up = '→ v' + ui.update + ' [u]';
+    scr.text(hx, y, up, C.green, null, A_BOLD);
+    hx += up.length + 1;
+  }
   const sub = 'Claude tokens' + (cfg.planLabel ? ' · ' + cfg.planLabel : '');
   scr.text(hx, y, clip(sub, cols - hx - 20), C.dim);
   if (ui.demoLabel) scr.text(hx + sub.length + 1, y, ' ' + ui.demoLabel + ' ', C.red, null, A_REV | A_BOLD);

@@ -40,18 +40,17 @@ jaune en pixel art qui vit sa vie sur l'eau… et panique quand tes limites appr
 
 Prérequis : [Node.js](https://nodejs.org) ≥ 18 (fourni avec npm — déjà présent si Claude Code tourne).
 
-### Depuis le dépôt, en SSH (recommandé)
+### Depuis le dépôt (recommandé)
 
 ```bash
-git clone git@github.com:Glance-mediametrie/ccduck.git
+git clone https://github.com/aanze/ccduck.git
 cd ccduck
 npm install -g .
 ```
 
 > Sous Windows, `npm install -g <dossier>` crée une **jonction** vers le clone :
-> un simple `git pull` dans le clone met à jour la commande, sans réinstaller.
-> (Sans clé SSH configurée, le clone HTTPS fonctionne aussi :
-> `git clone https://github.com/Glance-mediametrie/ccduck.git`.)
+> un simple `git pull` dans le clone met à jour la commande, sans réinstaller —
+> c'est ce que fait la touche `u`. (En SSH : `git clone git@github.com:aanze/ccduck.git`.)
 
 ### Depuis le package fourni (sans clone)
 
@@ -59,15 +58,15 @@ Un paquet npm prêt à l'emploi est fourni dans [`dist/`](dist/) (et attaché au
 Releases GitHub). Télécharger le `.tgz` puis :
 
 ```bash
-npm install -g ./ccduck-1.11.2.tgz
+npm install -g ./ccduck-1.12.0.tgz
 ```
 
 (Copie figée : pour mettre à jour, réinstaller le `.tgz` de la version suivante.)
 
-### En une ligne (sans clone, via SSH)
+### En une ligne (sans clone)
 
 ```bash
-npm install -g git+ssh://git@github.com/Glance-mediametrie/ccduck.git
+npm install -g git+https://github.com/aanze/ccduck.git
 ```
 
 Ensuite, depuis **n'importe quel terminal, n'importe où** :
@@ -149,6 +148,25 @@ config. La métrique par défaut est le **coût équivalent API** (cache lu 0,1�
 | `c` | afficher/masquer le tableau par modèle |
 | `d` | démo : 75 % → 93 % → balayage → off (pour voir le canard s'exciter) |
 | `p` / espace | pause |
+| `u` | installer la mise à jour quand l'en-tête en propose une |
+
+## Mises à jour
+
+Au lancement, ccduck regarde s'il existe une version plus récente. Quand c'est le cas,
+l'en-tête l'annonce — `CCDUCK v1.11.2 → v1.12.0 [u]` — et la touche `u` l'installe :
+`git pull` si la commande pointe sur un clone (cas de `npm install -g <dossier>`, qui
+crée une jonction), sinon réinstallation npm depuis le dépôt. Hors interface :
+
+```bash
+ccduck --update
+```
+
+**Rien ne s'installe tout seul** : la touche ou la commande décide. La détection lit le
+`package.json` de la branche par défaut sur `raw.githubusercontent.com` (dépôt public,
+aucune authentification), au plus **une fois toutes les 6 h** — résultat mis en cache
+dans `~/.ccduck-update.json`. C'est le seul appel réseau de ccduck en dehors de
+l'endpoint d'usage d'Anthropic ; `"checkUpdates": false` dans la config le coupe
+entièrement. Un échec est silencieux : une panne réseau ne doit jamais gêner les jauges.
 
 ## Options
 
@@ -157,6 +175,7 @@ ccduck --once          instantané statique (sans animation)
 ccduck --demo[=95]     force les jauges (canard en panique garanti)
 ccduck --size 80x30    taille forcée
 ccduck --metric total  métrique au lancement
+ccduck --update        mettre à jour maintenant
 ccduck --help
 ```
 
@@ -190,14 +209,14 @@ Fichier optionnel, à créer dans le dossier utilisateur. Tout est optionnel :
 | `premiumShare` | part de l'enveloppe hebdo allouée au modèle premium pour la formule d'estimation (défaut `0.5`) |
 | `weeklyReset` | jour/heure du reset hebdo (`weekday` : 0 = dimanche … 6 = samedi) — utile seulement si le cache officiel de Claude Code est absent ; sinon le reset officiel est utilisé automatiquement |
 | `limits.*` | en **dollars équivalent API**, ou `"auto"` (pic historique) — ne sert qu'aux jauges estimées `≈` |
+| `checkUpdates` | `true` par défaut : vérifie une fois par demi-journée s'il existe une version plus récente. `false` coupe tout appel à GitHub |
 
-## Dépannage (postes de l'équipe)
+## Dépannage
 
 **« J'ai pull mais je n'ai pas les bons chiffres »** → vérifier d'abord `ccduck --version` :
 un `git pull` ne met à jour la commande que si l'installation vient de **clone +
-`npm install -g .`** (jonction). Installé via le `.tgz` ou le one-liner `git+ssh`, la
-commande est une copie figée → réinstaller (`npm install -g ./ccduck-<version>.tgz` ou
-relancer le one-liner).
+`npm install -g .`** (jonction). Installé via le `.tgz` ou le one-liner, la commande est
+une copie figée → réinstaller. `ccduck --update` fait le bon geste dans les deux cas.
 
 **Jauges sans `•`** : le pied de page indique la cause (`usage: …`) :
 
