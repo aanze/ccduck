@@ -206,7 +206,9 @@ function readPlanUsage(env, cfg) {
       const u5 = typeof last.u.fh === 'number' ? last.u.fh / 100 : null;
       const u7 = typeof last.u.sd === 'number' ? last.u.sd / 100 : null;
       if (u5 == null && u7 == null) { why = why || 'no fh/sd'; continue; }
-      return { u5h: u5, u7d: u7, at: Number(last.t) || 0, path: p };
+      // on garde l'historique récent : il sert à calibrer l'extrapolation
+      const hist = arr.slice(-40).map((s) => ({ t: Number(s.t) || 0, fh: s.u && s.u.fh, sd: s.u && s.u.sd }));
+      return { u5h: u5, u7d: u7, at: Number(last.t) || 0, path: p, samples: hist };
     } catch (e) {
       // ENOENT = app pas installée à cet emplacement, on continue ; le reste
       // (droits, JSON tronqué pendant une écriture) mérite d'être signalé.
@@ -536,6 +538,38 @@ class DataStore {
       (pct != null && at && now - at < MAXAGE && (!reset || reset > now))
         ? [{ src, pct, reset: reset || 0, at }] : [];
     const best = (arr) => arr.sort((a, b) => b.at - a.at)[0] || null;
+
+    // L'app n'échantillonne que toutes les 5 min : entre deux relevés, le compteur
+    // affiché retarde d'autant. On comble avec la conso réellement observée dans les
+    // transcripts, convertie en points de pourcentage grâce à un facteur calibré sur
+    // l'historique de l'app lui-même (aucune valeur inventée : Δ% mesuré / Δcoût mesuré).
+    const costBetween = (t0, t1) => {
+      let c = 0;
+      for (const e of es) if (e.ts > t0 && e.ts <= t1) c += e.cost;
+      return c;
+    };
+    const calibrate = (samples, field) => {
+      if (!Array.isArray(samples) || samples.length < 3) return 0;
+      let dPct = 0, dCost = 0;
+      for (let i = 1; i < samples.length; i++) {
+        const a = samples[i - 1], b = samples[i];
+        if (typeof a[field] !== 'number' || typeof b[field] !== 'number') continue;
+        const dp = b[field] - a[field];
+        if (dp <= 0) continue;                    // reset de fenêtre ou palier : on ignore
+        const dc = costBetween(a.t, b.t);
+        if (dc <= 0) continue;
+        dPct += dp; dCost += dc;
+      }
+      return dCost > 0 ? dPct / dCost : 0;        // points de % par dollar équivalent
+    };
+    const extrapolate = (sel, field) => {
+      if (!sel || sel.src !== 'app' || !plan || !plan.samples) return null;
+      const factor = calibrate(plan.samples, field);
+      if (!factor) return null;
+      const since = costBetween(sel.at, now);
+      if (since <= 0) return null;
+      return Math.min(100, sel.pct * 100 + since * factor);
+    };
     const api5 = od.data && od.data.five_hour, api7 = od.data && od.data.seven_day;
     const s5 = best([
       ...collect('api', api5 && api5.pct, api5 && api5.reset, od.fetchedAt),
@@ -688,16 +722,17 @@ class DataStore {
     const estBlockVal = active ? active.sum.val : 0;
     const estBlockCost = active ? active.sum.cost : 0;
     const estBlockTok = active ? active.sum.i + active.sum.o + active.sum.cw + active.sum.cr : 0;
+    const ex5 = extrapolate(s5, 'fh'), ex7 = extrapolate(s7, 'sd');
     if (off5) {
       push('session', 'SESSION 5h', estBlockVal, estBlockCost, estBlockTok, null,
-        reset5 ? (reset5 - now) / 1000 : null, null, { pct: off.u5h * 100 });
+        reset5 ? (reset5 - now) / 1000 : null, null, { pct: ex5 != null ? ex5 : off.u5h * 100 });
     } else {
       unknown('session', 'SESSION 5h', estBlockVal, estBlockTok, reset5 ? (reset5 - now) / 1000 : null);
     }
     const weekTok = week.i + week.o + week.cw + week.cr;
     if (off7) {
       push('week', 'WEEK', week.val, week.cost, weekTok, null,
-        reset7 ? (reset7 - now) / 1000 : null, null, { pct: off.u7d * 100 });
+        reset7 ? (reset7 - now) / 1000 : null, null, { pct: ex7 != null ? ex7 : off.u7d * 100 });
     } else {
       unknown('week', 'WEEK', week.val, weekTok, reset7 ? (reset7 - now) / 1000 : null);
     }
@@ -746,7 +781,7 @@ class DataStore {
       burnPerMin, burnTokPerMin, projPct,
       day, byFamDay,
       officialAt: off.at,
-      officialSrc: s5 ? s5.src : (s7 ? s7.src : null),
+      officialSrc: (s5 ? s5.src : (s7 ? s7.src : null)) + (ex5 != null || ex7 != null ? '+live' : ''),
       planSeen: !!plan,
       planErr,
       officialUsed: off5 || off7 || !!offPrem,
