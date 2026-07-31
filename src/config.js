@@ -22,6 +22,7 @@ const DEFAULTS = {
   panic: 90,                 // seuil panique (%)
   premiumFamily: 'auto',     // 'auto' | 'fable' | 'opus'
   premiumShare: 0.5,         // part de l'enveloppe hebdo allouée au modèle premium (formule d'estimation)
+  planUsageDir: null,        // dossier contenant plan-usage-history.json (si %APPDATA%\Claude est inaccessible)
   weeklyReset: null,         // null = fenêtre glissante 7j, sinon {weekday:0-6 (0=dim), hour:0-23}
   planLabel: '',             // affiché dans l'en-tête si renseigné (ex: "Max 20x")
   // Limites par jauge, dans l'unité de la métrique ('auto' = pic historique observé).

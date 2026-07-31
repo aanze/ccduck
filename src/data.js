@@ -145,9 +145,14 @@ function fetchUsage(token, userAgent, timeoutMs) {
 // SOURCE LA PLUS FIABLE : l'app Claude enregistre son propre relevé d'usage toutes
 // les 5 min dans plan-usage-history.json — `fh` = session 5 h, `sd` = hebdo (en %).
 // Aucun token, aucun appel réseau : ni 401 ni 429 possibles.
-function planUsageDirs(env) {
+function planUsageDirs(env, cfg) {
   const dirs = [];
   const add = (d) => { if (d && !dirs.includes(d)) dirs.push(d); };
+  // 1) chemin explicite (config planUsageDir ou variable CCDUCK_CLAUDE_DIR)
+  add(env.CCDUCK_CLAUDE_DIR);
+  if (cfg && cfg.planUsageDir) add(cfg.planUsageDir);
+  // 2) jonction dans le home : contourne un terminal qui n'a pas accès à %APPDATA%\Claude
+  try { add(path.join(os.homedir(), '.ccduck-claude')); } catch (e) { /* ignore */ }
   const roots = [env.APPDATA, env.LOCALAPPDATA];
   let home = null;
   try { home = os.homedir(); } catch (e) { /* ignore */ }
@@ -176,8 +181,8 @@ function readOnce(p) {
   }
 }
 
-function readPlanUsage(env) {
-  const dirs = planUsageDirs(env);
+function readPlanUsage(env, cfg) {
+  const dirs = planUsageDirs(env, cfg);
   let why = null;
   for (const d of dirs) {
     const p = path.join(d, 'plan-usage-history.json');
@@ -506,7 +511,7 @@ class DataStore {
     // Cache : une lecture ratée (fichier en cours de réécriture) ne doit pas faire
     // disparaître la source — on garde le dernier échantillon lu, il porte sa
     // propre date et reste soumis à la règle de fraîcheur.
-    const planRaw = readPlanUsage(process.env);
+    const planRaw = readPlanUsage(process.env, cfg);
     if (planRaw && planRaw.at) this.planCache = planRaw;
     const plan = (planRaw && planRaw.at) ? planRaw : (this.planCache || null);
     const planErr = plan ? null : ((planRaw && planRaw.error) || 'not found');
