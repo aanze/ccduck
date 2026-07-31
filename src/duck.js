@@ -492,7 +492,7 @@ class Duck {
       if (!a.fed && t - a.start > 1.2) {
         a.fed = true;
         this.eaten = Math.min(6, this.eaten + 1);
-        if (this.nextPoopAt < t) this.nextPoopAt = t + rand(40, 90);
+        if (this.nextPoopAt < t) this.nextPoopAt = t + rand(60, 135);
       }
       if (Math.random() < dt * 5) this.spawn({
         x: this.headX() + rand(-2, 2), y: SPR_H - rand(0, 1),
@@ -554,7 +554,7 @@ class Duck {
     // il ira dès qu'il aura repris une allure normale
     if (this.feeding || POSE_FRAMES.has(this.frame)) return;
     this.eaten--;
-    this.nextPoopAt = t + rand(60, 150);
+    this.nextPoopAt = t + rand(95, 210);
     this.poopPose = { until: t + rand(2.2, 3), dropAt: t + rand(0.7, 1.1), dropped: false };
     if (this.act) this.act.speed = Math.min(this.act.speed, 1.2); // on ralentit, c'est plus digne
   }
@@ -575,6 +575,20 @@ class Duck {
     this.spawn({ x: tailX, y: SPR_H - 1, vx: rand(-1, 1), vy: -rand(1, 2), ch: '∘', fg: WATER, life: 0.4, rel: false });
     this.hop = 1.4;  // petit sursaut de soulagement
     if (Math.random() < 0.5) this.say('plop', 'calm', 1.1);
+  }
+
+  // Les envies (crotte, réclamation, joie) sont bloquées tant qu'une pose est
+  // tenue — sinon elles s'incrustent par-dessus. Mais un rendez-vous simplement
+  // retenu se déclenche à la seconde EXACTE où la pose se termine : le canard
+  // se réveillait et faisait sa commission dans la foulée, une fois sur deux en
+  // zen. On repousse donc les échéances tant que la pose dure : ce qui n'a pas
+  // pu arriver pendant le dodo arrive quelques secondes après, pas pendant le
+  // bâillement.
+  postponeUrges() {
+    const t = this.t;
+    this.nextPoopAt = Math.max(this.nextPoopAt, t + rand(2, 8));
+    this.nextBegAt = Math.max(this.nextBegAt, t + rand(2, 6));
+    this.nextJoyAt = Math.max(this.nextJoyAt, t + rand(2, 5));
   }
 
   // Météo : rien d'autre qu'un minuteur. L'averse tombe rarement et dure
@@ -727,7 +741,7 @@ class Duck {
         this.eaten = Math.min(6, this.eaten + 1);
         this.lastMealAt = t;
         this.nextBegAt = 0;   // rassasié : le prochain créneau repartira de zéro
-        if (this.nextPoopAt < t) this.nextPoopAt = t + rand(45, 110);
+        if (this.nextPoopAt < t) this.nextPoopAt = t + rand(70, 165);
         if (best.pill) {
           // gobée… l'effet est immédiat : 5 min de dodo, même en pleine panique
           this.sedatedUntil = t + SEDATE_SEC;
@@ -761,6 +775,7 @@ class Duck {
     // Sous sédatif : dodo paisible, imperméable aux jauges comme aux graines.
     if (t < this.sedatedUntil) {
       this.frame = 'sleep';
+      this.postponeUrges();   // 5 min de dodo ne doivent pas s'évacuer d'un coup au réveil
       if (Math.random() < dt * 0.9) this.spawn({
         x: this.headX(), y: 1, vx: 1.2, vy: -1.4, ch: 'z', fg: 0x9AA0A6, life: 1.8, grav: 0,
       });
@@ -775,6 +790,9 @@ class Duck {
       return;
     }
 
+    // `this.frame` porte encore l'image du tick précédent : c'est bien ce qu'il
+    // est en train de faire quand on décide de déclencher une envie ou non.
+    if (POSE_FRAMES.has(this.frame)) this.postponeUrges();
     this.maybePoop();
     this.maybeBeg();
     this.maybeJoy();
