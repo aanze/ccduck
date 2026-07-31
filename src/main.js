@@ -115,7 +115,7 @@ async function run(argv) {
     ui.draw(screen, {
       snap, cfg, tSec: 1.3, blinkOn: true,
       duckInfo: duck.renderInfo(), bubble: duck.bubble,
-      ui: { demoLabel: opts.demo != null ? 'DEMO' : '', loading: null, paused: false, showTable: true, metricLabel: METRIC_LABELS[metric] },
+      ui: { demoLabel: opts.demo != null ? 'DEMO' : '', loading: null, paused: false, showTable: true, metricLabel: METRIC_LABELS[metric], version: VERSION },
     });
     process.stdout.write(screen.renderLines() + '\n');
     return;
@@ -135,7 +135,7 @@ async function run(argv) {
       ui.draw(screen, {
         snap, cfg, tSec: t, blinkOn: Math.floor(t / 0.4) % 2 === 0,
         duckInfo: duck.renderInfo(), bubble: duck.bubble,
-        ui: { demoLabel: opts.demo != null ? 'DEMO' : '', loading: null, paused: false, showTable: true, metricLabel: METRIC_LABELS[metric] },
+        ui: { demoLabel: opts.demo != null ? 'DEMO' : '', loading: null, paused: false, showTable: true, metricLabel: METRIC_LABELS[metric], version: VERSION },
       });
       process.stdout.write(screen.renderLines() + '\n' + '─'.repeat(20) + ' frame ' + (f + 1) + '\n');
     }
@@ -245,7 +245,7 @@ async function run(argv) {
       duckInfo: duck.renderInfo(), bubble: duck.bubble,
       ui: {
         demoLabel: demo == null ? '' : 'DEMO' + (typeof demo === 'number' ? ' ' + demo + '%' : ''),
-        loading, paused, showTable, metricLabel: METRIC_LABELS[metric],
+        loading, paused, showTable, metricLabel: METRIC_LABELS[metric], version: VERSION,
       },
     });
     const frame = screen.render();

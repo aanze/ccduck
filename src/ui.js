@@ -245,7 +245,8 @@ function draw(scr, state) {
   // ---- en-tête ----
   let y = 0;
   scr.text(1, y, ' CCDUCK ', C.title, null, A_REV | A_BOLD);
-  let hx = 10;
+  scr.text(10, y, 'v' + (ui.version || '?'), C.faint);
+  let hx = 11 + String(ui.version || '?').length;
   const sub = 'Claude tokens' + (cfg.planLabel ? ' · ' + cfg.planLabel : '');
   scr.text(hx, y, clip(sub, cols - hx - 20), C.dim);
   if (ui.demoLabel) scr.text(hx + sub.length + 1, y, ' ' + ui.demoLabel + ' ', C.red, null, A_REV | A_BOLD);
@@ -314,7 +315,8 @@ function draw(scr, state) {
   } else {
     const keys = '[q]uit [f]eed [s]edate [r]efresh [m]etric:' + ui.metricLabel + ' [c]table [d]emo' + (ui.paused ? ' ▮▮' : '');
     const bits = [];
-    if (snap.officialUsed) bits.push('• /usage');
+    // source réellement retenue : app (fichier local de Claude), api, ou cache VS Code
+    if (snap.officialUsed) bits.push('• src:' + (snap.officialSrc || '?') + (snap.planSeen ? '' : ' (no app file)'));
     if (snap.meters.some((m) => m.auto)) bits.push('≈ auto (' + cfg.historyDays + 'd)');
     else if (!snap.officialUsed) bits.push('limits: config');
     // l'erreur API n'a d'importance que si les chiffres affichés vieillissent

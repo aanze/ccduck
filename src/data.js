@@ -472,20 +472,24 @@ class DataStore {
     const plan = readPlanUsage(process.env);
     // Un relevé est valable si sa fenêtre court encore, ou s'il est très récent
     // (les échantillons de l'app n'embarquent pas l'heure de reset).
-    const FRESH = 10 * 60 * 1000;
-    const collect = (pct, reset, at) => (pct != null && at && ((reset && reset > now) || now - at < FRESH))
-      ? [{ pct, reset: reset || 0, at }] : [];
+    // Règle dure : un relevé de plus de 15 min n'est PLUS considéré comme officiel.
+    // Mieux vaut basculer honnêtement en estimation ≈ que d'afficher un chiffre
+    // périmé avec un point « officiel » — c'est ce qui figeait les jauges.
+    const MAXAGE = 15 * 60 * 1000;
+    const collect = (src, pct, reset, at) =>
+      (pct != null && at && now - at < MAXAGE && (!reset || reset > now))
+        ? [{ src, pct, reset: reset || 0, at }] : [];
     const best = (arr) => arr.sort((a, b) => b.at - a.at)[0] || null;
     const api5 = od.data && od.data.five_hour, api7 = od.data && od.data.seven_day;
     const s5 = best([
-      ...collect(api5 && api5.pct, api5 && api5.reset, od.fetchedAt),
-      ...collect(cacheU && cacheU.u5h, cacheU && cacheU.reset5h, cacheU && cacheU.at),
-      ...collect(plan && plan.u5h, 0, plan && plan.at),
+      ...collect('api', api5 && api5.pct, api5 && api5.reset, od.fetchedAt),
+      ...collect('vscode', cacheU && cacheU.u5h, cacheU && cacheU.reset5h, cacheU && cacheU.at),
+      ...collect('app', plan && plan.u5h, 0, plan && plan.at),
     ]);
     const s7 = best([
-      ...collect(api7 && api7.pct, api7 && api7.reset, od.fetchedAt),
-      ...collect(cacheU && cacheU.u7d, cacheU && cacheU.reset7d, cacheU && cacheU.at),
-      ...collect(plan && plan.u7d, 0, plan && plan.at),
+      ...collect('api', api7 && api7.pct, api7 && api7.reset, od.fetchedAt),
+      ...collect('vscode', cacheU && cacheU.u7d, cacheU && cacheU.reset7d, cacheU && cacheU.at),
+      ...collect('app', plan && plan.u7d, 0, plan && plan.at),
     ]);
     // heure de reset : la meilleure connue, même si le pourcentage vient d'ailleurs
     const knownReset = (...v) => v.find((x) => x && x > now) || 0;
@@ -682,6 +686,8 @@ class DataStore {
       burnPerMin, burnTokPerMin, projPct,
       day, byFamDay,
       officialAt: off.at,
+      officialSrc: s5 ? s5.src : (s7 ? s7.src : null),
+      planSeen: !!plan,
       officialUsed: off5 || off7 || !!offPrem,
       officialErr: od.lastErr,
       officialRetryIn: Math.max(0, od.nextTryAt - now),
