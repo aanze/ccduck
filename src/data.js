@@ -11,8 +11,26 @@ const { PRICING, claudeProjectDirs } = require('./config');
 const H5 = 5 * 3600 * 1000;
 const D7 = 7 * 86400 * 1000;
 
-// Compteurs OFFICIELS de /usage, mis en cache localement par Claude Code
-// (écrit par l'extension VS Code / la statusline). Zéro réseau, zéro login.
+// ---- Compteurs officiels /usage ----
+// Source primaire : l'endpoint OAuth qu'utilise Claude Code lui-même
+// (GET https://api.anthropic.com/api/oauth/usage, Bearer = token local de
+// ~/.claude/.credentials.json). Même mécanisme que les statuslines communautaires.
+// Le token ne quitte jamais la machine autrement que vers api.anthropic.com.
+function readOAuthToken(env) {
+  const paths = [];
+  if (env.CLAUDE_CONFIG_DIR) paths.push(path.join(env.CLAUDE_CONFIG_DIR, '.credentials.json'));
+  paths.push(path.join(os.homedir(), '.claude', '.credentials.json'));
+  for (const p of paths) {
+    try {
+      const j = JSON.parse(fs.readFileSync(p, 'utf8'));
+      const o = j.claudeAiOauth || j;
+      if (o && typeof o.accessToken === 'string' && o.accessToken) return o.accessToken;
+    } catch (e) { /* absent : on retombera sur cache/estimation */ }
+  }
+  return null;
+}
+
+// Repli : cache local écrit par l'extension VS Code / la statusline (parfois périmé).
 function readOfficialUsage(env) {
   const paths = [];
   if (env.CLAUDE_CONFIG_DIR) paths.push(path.join(env.CLAUDE_CONFIG_DIR, 'vscode-claude-status-cache.json'));
@@ -62,6 +80,71 @@ class DataStore {
     this.lastScanAt = 0;
     this.lastError = null;
     this.seq = 0;
+    this.ccVersion = null;          // version de Claude Code vue dans les transcripts (pour le User-Agent)
+    this.official = { data: null, premium: null, fetchedAt: 0, nextTryAt: 0, inFlight: false };
+  }
+
+  // Interroge l'endpoint officiel. Prudent avec le rate limit (429 agressif) :
+  // au plus une requête toutes les 3 min, backoff long en cas d'erreur,
+  // on garde la dernière réponse valide entre deux.
+  async refreshOfficial() {
+    const o = this.official;
+    const now = Date.now();
+    if (o.inFlight || now < o.nextTryAt) return;
+    const token = readOAuthToken(process.env);
+    if (!token) { o.nextTryAt = now + 10 * 60 * 1000; return; }
+    o.inFlight = true;
+    try {
+      const ctrl = new AbortController();
+      const timer = setTimeout(() => ctrl.abort(), 6000);
+      const res = await fetch('https://api.anthropic.com/api/oauth/usage', {
+        headers: {
+          'Authorization': 'Bearer ' + token,
+          'anthropic-beta': 'oauth-2025-04-20',
+          'Content-Type': 'application/json',
+          'User-Agent': 'claude-code/' + (this.ccVersion || '2.1.219'),
+        },
+        signal: ctrl.signal,
+      });
+      clearTimeout(timer);
+      if (res.status === 429) {
+        const ra = Number(res.headers.get('retry-after')) || 0;
+        o.nextTryAt = now + Math.max(ra * 1000, 15 * 60 * 1000);
+        return;
+      }
+      if (!res.ok) { o.nextTryAt = now + (res.status === 401 ? 10 : 5) * 60 * 1000; return; }
+      const j = await res.json();
+      const win = (v) => (v && typeof v.utilization === 'number')
+        ? { pct: v.utilization / 100, reset: Date.parse(v.resets_at) || 0 } : null;
+      // Source de vérité : le tableau `limits` (c'est lui que l'écran /usage affiche).
+      // Repli sur les champs plats five_hour/seven_day/seven_day_* si absent.
+      const lims = Array.isArray(j.limits) ? j.limits : [];
+      const byKind = {};
+      for (const L of lims) if (L && typeof L.percent === 'number') byKind[L.kind] = L;
+      const fromLimit = (L) => L ? { pct: L.percent / 100, reset: Date.parse(L.resets_at) || 0 } : null;
+      o.data = {
+        five_hour: fromLimit(byKind.session) || win(j.five_hour),
+        seven_day: fromLimit(byKind.weekly_all) || win(j.seven_day),
+      };
+      const scoped = lims.find((L) => L && L.kind === 'weekly_scoped' && typeof L.percent === 'number');
+      if (scoped) {
+        const dn = scoped.scope && scoped.scope.model && scoped.scope.model.display_name;
+        o.premium = { name: String(dn || 'premium').toLowerCase(), pct: scoped.percent / 100, reset: Date.parse(scoped.resets_at) || 0 };
+      } else {
+        o.premium = null;
+        for (const [k, v] of Object.entries(j)) {
+          const m = /^seven_day_(.+)$/.exec(k);
+          if (m && m[1] !== 'oauth_apps' && win(v)) { o.premium = { name: m[1], ...win(v) }; break; }
+        }
+      }
+      o.raw = j; // pour --debug-usage (contient uniquement des stats, jamais le token)
+      o.fetchedAt = now;
+      o.nextTryAt = now + 180 * 1000;
+    } catch (e) {
+      o.nextTryAt = now + 5 * 60 * 1000; // réseau/proxy : on retentera, repli en attendant
+    } finally {
+      o.inFlight = false;
+    }
   }
 
   listFiles() {
@@ -99,6 +182,7 @@ class DataStore {
       let j;
       try { j = JSON.parse(line); } catch (e) { continue; }
       if (j.type !== 'assistant' || !j.message || !j.message.usage) continue;
+      if (j.version) this.ccVersion = j.version;
       const m = j.message;
       if (m.model === '<synthetic>') continue;
       const u = m.usage;
@@ -194,12 +278,28 @@ class DataStore {
     }
     const active = blocks.length && now < blocks[blocks.length - 1].end ? blocks[blocks.length - 1] : null;
 
-    // Compteurs officiels (/usage) si le cache local de Claude Code est exploitable.
-    // La donnée 5h n'est fiable que si le cache a été écrit APRÈS le début du bloc
-    // en cours ; sinon elle décrit un bloc passé et on retombe sur l'estimation.
-    const off = readOfficialUsage(process.env);
-    const off5 = !!(off && off.u5h != null && off.reset5h > now && off.at >= off.reset5h - H5);
-    const off7 = !!(off && off.u7d != null && off.reset7d > now && off.at >= off.reset7d - D7);
+    // Compteurs officiels : API /usage live en priorité, sinon cache VS Code local.
+    // Pour le cache (souvent périmé), la donnée 5h n'est fiable que si elle a été
+    // écrite APRÈS le début du bloc en cours ; l'API live est la vérité telle quelle.
+    const live = (this.official.data && now - this.official.fetchedAt < 30 * 60 * 1000) ? this.official : null;
+    let off = null, offSource = null;
+    if (live) {
+      off = {
+        u5h: live.data.five_hour ? live.data.five_hour.pct : null,
+        reset5h: live.data.five_hour ? live.data.five_hour.reset : 0,
+        u7d: live.data.seven_day ? live.data.seven_day.pct : null,
+        reset7d: live.data.seven_day ? live.data.seven_day.reset : 0,
+        at: live.fetchedAt,
+      };
+      offSource = 'api';
+    } else {
+      const c = readOfficialUsage(process.env);
+      if (c) { off = c; offSource = 'cache'; }
+    }
+    const off5 = !!(off && off.u5h != null && (offSource === 'api' || (off.reset5h > now && off.at >= off.reset5h - H5)));
+    const off7 = !!(off && off.u7d != null && (offSource === 'api' || (off.reset7d > now && off.at >= off.reset7d - D7)));
+    // Jauge premium officielle (limite hebdo par modèle : Fable/Opus/…)
+    const offPrem = live && live.premium ? live.premium : null;
 
     // Fenêtres jour / semaine
     const midnight = new Date(now); midnight.setHours(0, 0, 0, 0);
@@ -221,9 +321,10 @@ class DataStore {
       weekStart = now - 7 * 86400 * 1000;
     }
 
-    // Famille premium suivie par la 4e jauge
+    // Famille premium suivie par la 3e jauge (bucket officiel prioritaire)
     let premiumFam = cfg.premiumFamily;
-    if (premiumFam === 'auto') {
+    if (offPrem) premiumFam = offPrem.name;
+    else if (premiumFam === 'auto') {
       const recent = now - 14 * 86400 * 1000;
       premiumFam = es.some((e) => e.fam === 'fable' && e.ts > recent) ? 'fable'
         : es.some((e) => e.fam === 'opus' && e.ts > recent) ? 'opus' : 'fable';
@@ -315,9 +416,15 @@ class DataStore {
         lim('week', maxWeek, week.val),
         weekReset ? (weekReset - now) / 1000 : null, weekReset ? null : '7d rolling');
     }
-    push('premium', premiumFam.toUpperCase() + ' 7d', premium.val, premium.i + premium.o + premium.cw + premium.cr,
-      lim('premium', maxPremium, premium.val),
-      weekReset ? (weekReset - now) / 1000 : null, weekReset ? null : '7d rolling');
+    const premTok = premium.i + premium.o + premium.cw + premium.cr;
+    if (offPrem) {
+      push('premium', premiumFam.toUpperCase() + ' 7d', premium.val, premTok, null,
+        (offPrem.reset - now) / 1000, null, { pct: offPrem.pct * 100 });
+    } else {
+      push('premium', premiumFam.toUpperCase() + ' 7d', premium.val, premTok,
+        lim('premium', maxPremium, premium.val),
+        weekReset ? (weekReset - now) / 1000 : null, weekReset ? null : '7d rolling');
+    }
 
     // Débit et projection de fin de bloc
     const burnPerMin = hour.val / 60;
@@ -339,7 +446,8 @@ class DataStore {
       burnPerMin, burnTokPerMin, projPct,
       day, byFamDay,
       officialAt: off ? off.at : 0,
-      officialUsed: off5 || off7,
+      officialUsed: off5 || off7 || !!offPrem,
+      officialSource: offSource,
       entryCount: this.entries.size,
       lastScanAt: this.lastScanAt,
       lastError: this.lastError,

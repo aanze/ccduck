@@ -46,7 +46,7 @@ Un paquet npm prêt à l'emploi est fourni dans [`dist/`](dist/) (et attaché au
 Releases GitHub). Télécharger le `.tgz` puis :
 
 ```bash
-npm install -g ./ccduck-1.3.0.tgz
+npm install -g ./ccduck-1.4.0.tgz
 ```
 
 (Copie figée : pour mettre à jour, réinstaller le `.tgz` de la version suivante.)
@@ -77,17 +77,21 @@ typiquement `%APPDATA%\npm` sous Windows) est dans le `PATH`, puis rouvrir le te
 
 ## D'où viennent les chiffres ?
 
-**Aucune requête réseau, aucune clé API, aucune connexion** — tout est lu sur le poste :
+**Aucune connexion à faire, aucune clé à fournir** — trois sources, par ordre de priorité :
 
-1. **Pourcentages officiels** (`•`) : Claude Code met en cache les compteurs de `/usage`
-   dans `~/.claude/vscode-claude-status-cache.json` (utilisation 5 h et 7 j + heures de
-   reset). Quand ce cache existe et couvre la fenêtre en cours, les jauges SESSION et
-   WEEK affichent **exactement** ce que montre `/usage`. Le cache se rafraîchit quand
-   Claude Code tourne ; s'il date, l'âge est indiqué en pied de page.
-2. **Estimation locale** (`≈`) : ccduck lit les transcripts (`~/.claude/projects/**/*.jsonl`),
-   déduplique les messages et agrège l'usage réel par modèle. Sert de repli quand le
-   cache officiel manque (jauge SESSION en début de bloc, poste sans cache), et alimente
-   la jauge premium, les coûts, débits et le tableau — infos que `/usage` ne donne pas.
+1. **Pourcentages officiels** (`•`) : ccduck interroge le même endpoint que l'écran
+   `/usage` de Claude Code (`api.anthropic.com/api/oauth/usage`), authentifié avec le
+   token OAuth **déjà présent** sur le poste (`~/.claude/.credentials.json`) — le
+   mécanisme standard des statuslines communautaires. Les trois jauges (session 5 h,
+   hebdo tous modèles, hebdo Fable/Opus) affichent alors **exactement** les chiffres
+   officiels, resets compris. Requête au plus toutes les 3 min (l'endpoint rate-limite
+   sévèrement), token jamais loggé et jamais envoyé ailleurs que chez Anthropic.
+   `ccduck --debug-usage` montre la réponse brute.
+2. **Cache local de Claude Code** (`• cache`) : `~/.claude/vscode-claude-status-cache.json`,
+   utilisé si l'API ne répond pas (hors ligne, 429). L'âge est affiché s'il date.
+3. **Estimation locale** (`≈`) : lecture des transcripts (`~/.claude/projects/**/*.jsonl`),
+   déduplication, agrégation par modèle. Repli final, et dans tous les cas la source
+   des coûts, débits, projections et du tableau — infos que `/usage` ne donne pas.
 
 Il n'y a **pas de jauge journalière** : cette limite n'existe pas chez Anthropic (les
 limites réelles sont le bloc de 5 h et les quotas hebdomadaires). Le total du jour reste
