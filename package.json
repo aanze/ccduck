@@ -1,0 +1,19 @@
+{
+  "name": "ccduck",
+  "version": "1.1.0",
+  "description": "Moniteur de tokens Claude Code dans le terminal, avec un canard de debug en pixel art",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/Glance-mediametrie/ccduck.git"
+  },
+  "homepage": "https://github.com/Glance-mediametrie/ccduck#readme",
+  "bin": {
+    "ccduck": "bin/ccduck.js",
+    "claude-duck": "bin/ccduck.js"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "private": true,
+  "license": "MIT"
+}
