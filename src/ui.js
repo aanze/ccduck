@@ -96,10 +96,12 @@ function drawMeter(scr, y, m, L, cfg, blinkOn, isWorst) {
   scr.text(x, y, fmtPct(pct), color, null, pctAt);
   x += 5;
   if (L.figsW) {
+    // % toujours canonique (coût pondéré) ; la métrique ne change que ces chiffres
     let figs;
     if (m.official) figs = '• ' + fmtMetric(m.used, snapMetric); // % officiel, dépense estimée à côté
-    else figs = fmtMetric(m.used, snapMetric) + '/' + (m.auto ? '≈' : '') + fmtMetric(m.limit, snapMetric);
-    if (L.figsW >= 20) figs += ' · ' + fmtTok(m.tokens);
+    else if (snapMetric === 'cost') figs = fmtCost(m.used) + '/' + (m.auto ? '≈' : '') + fmtCost(m.limit);
+    else figs = (m.auto ? '≈ ' : '') + fmtMetric(m.used, snapMetric);
+    if (L.figsW >= 20 && snapMetric === 'cost') figs += ' · ' + fmtTok(m.tokens);
     scr.text(x, y, padR(clip(figs, L.figsW), L.figsW), C.dim);
     x += L.figsW + 1;
   }

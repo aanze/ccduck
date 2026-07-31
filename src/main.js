@@ -54,7 +54,7 @@ function applyDemo(snap, demo, tSec) {
   const offsets = { session: -16, week: 0, premium: -5 };
   const meters = snap.meters.map((m) => {
     const pct = Math.max(3, v + (offsets[m.key] || 0));
-    return { ...m, pct, used: (m.limit * pct) / 100 };
+    return { ...m, pct };
   });
   return { ...snap, meters, projPct: Math.min(140, v + 6) };
 }
@@ -89,7 +89,7 @@ async function run(argv) {
       nextTryAt: o.nextTryAt ? new Date(o.nextTryAt).toISOString() : null,
       lastErr: o.lastErr, data: o.data, premium: o.premium,
     }, null, 2));
-    console.log('\nforcing live call…');
+    console.log('\nforcing live call… (note: consumes the endpoint\'s small rate budget — avoid repeating)');
     o.nextTryAt = 0;
     await store.refreshOfficial();
     console.log(o.raw ? JSON.stringify(o.raw, null, 2) : 'live call failed: ' + (o.lastErr || 'unknown'));

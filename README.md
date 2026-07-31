@@ -46,7 +46,7 @@ Un paquet npm prêt à l'emploi est fourni dans [`dist/`](dist/) (et attaché au
 Releases GitHub). Télécharger le `.tgz` puis :
 
 ```bash
-npm install -g ./ccduck-1.4.2.tgz
+npm install -g ./ccduck-1.4.3.tgz
 ```
 
 (Copie figée : pour mettre à jour, réinstaller le `.tgz` de la version suivante.)
@@ -146,14 +146,14 @@ Fichier optionnel, à créer dans le dossier utilisateur. Tout est optionnel :
 
 | Clé | Rôle |
 |---|---|
-| `metric` | `cost` (défaut), `total` ou `billable` — unité des jauges et des limites |
+| `metric` | `cost` (défaut), `total` ou `billable` — **unité d'affichage** des chiffres uniquement ; les `%` estimés sont toujours calculés en coût pondéré (touche `m` pour basculer) |
 | `historyDays` | fenêtre d'historique parsée et de calibrage auto (défaut 35) |
 | `refreshSec` / `fps` | fréquence de rescan des transcripts / d'animation |
 | `alert` / `panic` | seuils (%) qui déclenchent l'alerte et la panique du canard |
 | `planLabel` | libellé affiché dans l'en-tête (ex. `"Max 20x"`) |
 | `premiumFamily` | `auto` (fable si utilisé, sinon opus), `fable` ou `opus` |
 | `weeklyReset` | jour/heure du reset hebdo (`weekday` : 0 = dimanche … 6 = samedi) — utile seulement si le cache officiel de Claude Code est absent ; sinon le reset officiel est utilisé automatiquement |
-| `limits.*` | nombre dans l'unité de la métrique (`cost` → dollars, sinon tokens), ou `"auto"` |
+| `limits.*` | en **dollars équivalent API**, ou `"auto"` (pic historique) — ne sert qu'aux jauges estimées `≈` |
 
 ## Dépannage (postes de l'équipe)
 
@@ -168,7 +168,7 @@ relancer le one-liner).
 | Statut | Cause / remède |
 |---|---|
 | `no token` | pas de token OAuth local (connexion par clé API ou compte entreprise) → jauges en estimation `≈` uniquement. macOS : le token est lu depuis le Trousseau. |
-| `rate-limited (retry Xmin)` | l'endpoint `/usage` limite sévèrement les appels ; ça revient tout seul, la dernière valeur valide reste affichée |
+| `rate-limited (retry Xmin)` | délai **imposé par le serveur** (`retry-after`, parfois ~1 h) : son budget est petit, partagé avec l'écran `/usage` de Claude Code et vraisemblablement compté par IP de sortie (bureau = IP commune). Ne pas insister (ça aggrave) ; repli cache/`≈` en attendant, ça se résorbe seul |
 | `tls (proxy? see README)` | proxy d'entreprise qui intercepte TLS : lancer avec `NODE_OPTIONS=--use-system-ca` (Node ≥ 22.15) ou pointer `NODE_EXTRA_CA_CERTS` vers le bundle CA interne |
 | `offline` / `timeout` | réseau inaccessible depuis ce poste |
 

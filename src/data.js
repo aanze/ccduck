@@ -142,9 +142,13 @@ class DataStore {
       });
       clearTimeout(timer);
       if (res.status === 429) {
-        const ra = Number(res.headers.get('retry-after')) || 0;
+        // retry-after imposé par le serveur (secondes ou date HTTP) — le respecter
+        // scrupuleusement : les 429 de cet endpoint s'aggravent si on insiste.
+        const raw = res.headers.get('retry-after') || '';
+        let ra = Number(raw) * 1000;
+        if (!isFinite(ra) || ra <= 0) ra = (Date.parse(raw) || 0) - now;
         o.lastErr = 'rate-limited';
-        o.nextTryAt = now + Math.max(ra * 1000, 15 * 60 * 1000);
+        o.nextTryAt = now + Math.max(ra || 0, 15 * 60 * 1000) + Math.random() * 90 * 1000;
         saveOfficialState(o);
         return;
       }
@@ -180,7 +184,10 @@ class DataStore {
       }
       o.raw = j; // pour --debug-usage (contient uniquement des stats, jamais le token)
       o.fetchedAt = now;
-      o.nextTryAt = now + 180 * 1000;
+      // 5 min ± jitter : plusieurs postes derrière la même IP de sortie ne doivent
+      // pas marteler l'endpoint en cadence (son budget est petit et partagé avec
+      // l'écran /usage de Claude Code lui-même).
+      o.nextTryAt = now + 300 * 1000 + (Math.random() * 120 * 1000 - 60 * 1000);
       o.lastErr = null;
       saveOfficialState(o);
     } catch (e) {
@@ -398,9 +405,11 @@ class DataStore {
       if (e.ts >= hourAgo) acc(hour, e);
     }
 
-    // Maxima historiques pour les limites auto
+    // Maxima historiques pour les limites auto — TOUJOURS en coût pondéré, quelle
+    // que soit la métrique d'affichage : les pourcentages estimés sont canoniques
+    // (la touche m ne change que l'unité des chiffres, jamais les %).
     let maxBlock = 0;
-    for (const b of blocks) if (b !== active) maxBlock = Math.max(maxBlock, b.sum.val);
+    for (const b of blocks) if (b !== active) maxBlock = Math.max(maxBlock, b.sum.cost);
     // Semaine glissante max : somme sur fenêtre de 168h par pas d'une heure.
     // On exclut les 7 derniers jours : seules les périodes révolues calibrent la
     // limite auto (sinon la fenêtre courante est son propre max → 100 % permanent).
@@ -411,7 +420,7 @@ class DataStore {
         if (e.ts > winCutoff) continue;
         if (filter && !filter(e)) continue;
         const h = Math.floor(e.ts / 3600000);
-        hours.set(h, (hours.get(h) || 0) + entryMetric(e, metric));
+        hours.set(h, (hours.get(h) || 0) + e.cost);
       }
       const keys = [...hours.keys()].sort((a, b) => a - b);
       let best = 0;
@@ -425,9 +434,7 @@ class DataStore {
     const maxWeek = maxWin(null);
     const maxPremium = maxWin((e) => e.fam === premiumFam);
 
-    const floors = metric === 'cost'
-      ? { session: 5, week: 40, premium: 20 }
-      : { session: 2e6, week: 2e7, premium: 1e7 };
+    const floors = { session: 5, week: 40, premium: 20 }; // dollars (éq. API)
     // Limite auto = pic des périodes révolues, avec 15 % de marge au-dessus de la
     // fenêtre courante : battre son record affiche ~87 %, jamais un faux 100 %.
     const lim = (key, observed, current) => {
@@ -441,56 +448,59 @@ class DataStore {
     // sinon estimation locale vs limite auto (marquée ≈). Pas de jauge "jour" :
     // cette limite n'existe pas (le total du jour vit dans la ligne de stats).
     const meters = [];
-    const push = (key, label, used, tokens, limit, resetSec, resetText, official) => {
+    const push = (key, label, used, usedCost, tokens, limit, resetSec, resetText, official) => {
       meters.push({
         key, label, used, tokens,
-        limit: official ? null : limit.v,
+        limit: official ? null : limit.v,       // dollars (éq. API)
         auto: official ? false : limit.auto,
         official: !!official,
-        pct: official ? official.pct : (limit.v > 0 ? (used / limit.v) * 100 : 0),
+        pct: official ? official.pct : (limit.v > 0 ? (usedCost / limit.v) * 100 : 0),
         resetSec, resetText,
       });
     };
     const estBlockVal = active ? active.sum.val : 0;
+    const estBlockCost = active ? active.sum.cost : 0;
     const estBlockTok = active ? active.sum.i + active.sum.o + active.sum.cw + active.sum.cr : 0;
     if (off5) {
-      push('session', 'SESSION 5h', estBlockVal, estBlockTok, null,
+      push('session', 'SESSION 5h', estBlockVal, estBlockCost, estBlockTok, null,
         (off.reset5h - now) / 1000, null, { pct: off.u5h * 100 });
     } else {
-      push('session', 'SESSION 5h', estBlockVal, estBlockTok,
-        lim('session', maxBlock, estBlockVal),
+      push('session', 'SESSION 5h', estBlockVal, estBlockCost, estBlockTok,
+        lim('session', maxBlock, estBlockCost),
         active ? (active.end - now) / 1000 : null, active ? null : 'idle');
     }
+    const weekTok = week.i + week.o + week.cw + week.cr;
     if (off7) {
-      push('week', 'WEEK', week.val, week.i + week.o + week.cw + week.cr, null,
+      push('week', 'WEEK', week.val, week.cost, weekTok, null,
         (off.reset7d - now) / 1000, null, { pct: off.u7d * 100 });
     } else {
-      push('week', 'WEEK', week.val, week.i + week.o + week.cw + week.cr,
-        lim('week', maxWeek, week.val),
+      push('week', 'WEEK', week.val, week.cost, weekTok,
+        lim('week', maxWeek, week.cost),
         weekReset ? (weekReset - now) / 1000 : null, weekReset ? null : '7d rolling');
     }
     const premTok = premium.i + premium.o + premium.cw + premium.cr;
     if (offPrem) {
-      push('premium', premiumFam.toUpperCase() + ' 7d', premium.val, premTok, null,
+      push('premium', premiumFam.toUpperCase() + ' 7d', premium.val, premium.cost, premTok, null,
         (offPrem.reset - now) / 1000, null, { pct: offPrem.pct * 100 });
     } else {
-      push('premium', premiumFam.toUpperCase() + ' 7d', premium.val, premTok,
-        lim('premium', maxPremium, premium.val),
+      push('premium', premiumFam.toUpperCase() + ' 7d', premium.val, premium.cost, premTok,
+        lim('premium', maxPremium, premium.cost),
         weekReset ? (weekReset - now) / 1000 : null, weekReset ? null : '7d rolling');
     }
 
-    // Débit et projection de fin de bloc
+    // Débit et projection de fin de bloc (canoniques en coût, comme les %)
     const burnPerMin = hour.val / 60;
+    const burnCostPerMin = hour.cost / 60;
     const burnTokPerMin = (hour.i + hour.o + hour.cw + hour.cr) / 60;
     let projPct = null;
     const sess = meters[0];
     if (active) {
       const remainMin = ((off5 ? off.reset5h : active.end) - now) / 60000;
-      if (sess.official && estBlockVal > 0) {
+      if (sess.official && estBlockCost > 0) {
         // règle de trois sur le pourcentage officiel, au rythme de dépense actuel
-        projPct = sess.pct * (1 + (burnPerMin * Math.max(0, remainMin)) / estBlockVal);
+        projPct = sess.pct * (1 + (burnCostPerMin * Math.max(0, remainMin)) / estBlockCost);
       } else if (!sess.official && sess.limit > 0) {
-        projPct = ((estBlockVal + burnPerMin * Math.max(0, remainMin)) / sess.limit) * 100;
+        projPct = ((estBlockCost + burnCostPerMin * Math.max(0, remainMin)) / sess.limit) * 100;
       }
     }
 
