@@ -196,6 +196,9 @@ function readOnce(p) {
 
 function readPlanUsage(env, cfg) {
   let why = null;
+  let best = null;
+  // On lit TOUS les candidats et on garde le relevé le plus récent. Prendre le
+  // premier lisible ferait gagner un miroir périmé face au vrai fichier de l'app.
   for (const p of planUsageFiles(env, cfg)) {
     try {
       const j = readOnce(p);
@@ -206,15 +209,18 @@ function readPlanUsage(env, cfg) {
       const u5 = typeof last.u.fh === 'number' ? last.u.fh / 100 : null;
       const u7 = typeof last.u.sd === 'number' ? last.u.sd / 100 : null;
       if (u5 == null && u7 == null) { why = why || 'no fh/sd'; continue; }
+      const at = Number(last.t) || 0;
+      if (best && at <= best.at) continue;
       // on garde l'historique récent : il sert à calibrer l'extrapolation
       const hist = arr.slice(-40).map((s) => ({ t: Number(s.t) || 0, fh: s.u && s.u.fh, sd: s.u && s.u.sd }));
-      return { u5h: u5, u7d: u7, at: Number(last.t) || 0, path: p, samples: hist };
+      best = { u5h: u5, u7d: u7, at, path: p, samples: hist };
     } catch (e) {
       // ENOENT = app pas installée à cet emplacement, on continue ; le reste
       // (droits, JSON tronqué pendant une écriture) mérite d'être signalé.
       if (e && e.code !== 'ENOENT') why = String(e.code || 'parse error');
     }
   }
+  if (best) return best;
   return why ? { error: why } : null;
 }
 
