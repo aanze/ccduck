@@ -5,9 +5,34 @@
 
 const fs = require('fs');
 const path = require('path');
+const os = require('os');
 const { PRICING, claudeProjectDirs } = require('./config');
 
 const H5 = 5 * 3600 * 1000;
+const D7 = 7 * 86400 * 1000;
+
+// Compteurs OFFICIELS de /usage, mis en cache localement par Claude Code
+// (écrit par l'extension VS Code / la statusline). Zéro réseau, zéro login.
+function readOfficialUsage(env) {
+  const paths = [];
+  if (env.CLAUDE_CONFIG_DIR) paths.push(path.join(env.CLAUDE_CONFIG_DIR, 'vscode-claude-status-cache.json'));
+  paths.push(path.join(os.homedir(), '.claude', 'vscode-claude-status-cache.json'));
+  for (const p of paths) {
+    try {
+      const j = JSON.parse(fs.readFileSync(p, 'utf8'));
+      const u = j.usageData || j;
+      if (typeof u.utilization5h !== 'number' && typeof u.utilization7d !== 'number') continue;
+      return {
+        u5h: typeof u.utilization5h === 'number' ? u.utilization5h : null,
+        u7d: typeof u.utilization7d === 'number' ? u.utilization7d : null,
+        reset5h: (u.reset5hAt || 0) * 1000,
+        reset7d: (u.reset7dAt || 0) * 1000,
+        at: Date.parse(j.updatedAt) || 0,
+      };
+    } catch (e) { /* fichier absent/illisible : estimation */ }
+  }
+  return null;
+}
 
 function familyOf(model) {
   const m = String(model || '');
@@ -169,11 +194,22 @@ class DataStore {
     }
     const active = blocks.length && now < blocks[blocks.length - 1].end ? blocks[blocks.length - 1] : null;
 
+    // Compteurs officiels (/usage) si le cache local de Claude Code est exploitable.
+    // La donnée 5h n'est fiable que si le cache a été écrit APRÈS le début du bloc
+    // en cours ; sinon elle décrit un bloc passé et on retombe sur l'estimation.
+    const off = readOfficialUsage(process.env);
+    const off5 = !!(off && off.u5h != null && off.reset5h > now && off.at >= off.reset5h - H5);
+    const off7 = !!(off && off.u7d != null && off.reset7d > now && off.at >= off.reset7d - D7);
+
     // Fenêtres jour / semaine
     const midnight = new Date(now); midnight.setHours(0, 0, 0, 0);
     const dayStart = midnight.getTime();
     let weekStart, weekReset = null;
-    if (cfg.weeklyReset && typeof cfg.weeklyReset.weekday === 'number') {
+    if (off7) {
+      // fenêtre hebdo officielle
+      weekStart = off.reset7d - D7;
+      weekReset = off.reset7d;
+    } else if (cfg.weeklyReset && typeof cfg.weeklyReset.weekday === 'number') {
       const d = new Date(now);
       d.setHours(cfg.weeklyReset.hour || 0, 0, 0, 0);
       let delta = (d.getDay() - cfg.weeklyReset.weekday + 7) % 7;
@@ -211,18 +247,14 @@ class DataStore {
     // Maxima historiques pour les limites auto
     let maxBlock = 0;
     for (const b of blocks) if (b !== active) maxBlock = Math.max(maxBlock, b.sum.val);
-    const dayTotals = new Map();
-    for (const e of es) {
-      const d = new Date(e.ts); d.setHours(0, 0, 0, 0);
-      const k = d.getTime();
-      dayTotals.set(k, (dayTotals.get(k) || 0) + entryMetric(e, metric));
-    }
-    let maxDay = 0;
-    for (const [k, v] of dayTotals) if (k !== dayStart) maxDay = Math.max(maxDay, v);
-    // Semaine glissante max : somme sur fenêtre de 168h par pas d'une heure
+    // Semaine glissante max : somme sur fenêtre de 168h par pas d'une heure.
+    // On exclut les 7 derniers jours : seules les périodes révolues calibrent la
+    // limite auto (sinon la fenêtre courante est son propre max → 100 % permanent).
+    const winCutoff = now - 7 * 86400 * 1000;
     const maxWin = (filter) => {
       const hours = new Map();
       for (const e of es) {
+        if (e.ts > winCutoff) continue;
         if (filter && !filter(e)) continue;
         const h = Math.floor(e.ts / 3600000);
         hours.set(h, (hours.get(h) || 0) + entryMetric(e, metric));
@@ -240,45 +272,74 @@ class DataStore {
     const maxPremium = maxWin((e) => e.fam === premiumFam);
 
     const floors = metric === 'cost'
-      ? { session: 5, day: 10, week: 40, premium: 20 }
-      : { session: 2e6, day: 5e6, week: 2e7, premium: 1e7 };
-    const lim = (key, observed) => {
+      ? { session: 5, week: 40, premium: 20 }
+      : { session: 2e6, week: 2e7, premium: 1e7 };
+    // Limite auto = pic des périodes révolues, avec 15 % de marge au-dessus de la
+    // fenêtre courante : battre son record affiche ~87 %, jamais un faux 100 %.
+    const lim = (key, observed, current) => {
       const c = cfg.limits[key];
       if (typeof c === 'number' && c > 0) return { v: c, auto: false };
-      return { v: Math.max(observed, floors[key]), auto: true };
+      return { v: Math.max(observed, (current || 0) * 1.15, floors[key]), auto: true };
     };
 
+    // 3 jauges, alignées sur les limites réelles d'Anthropic : bloc 5h, hebdo
+    // globale, hebdo premium. `official` = pourcentage exact issu de /usage ;
+    // sinon estimation locale vs limite auto (marquée ≈). Pas de jauge "jour" :
+    // cette limite n'existe pas (le total du jour vit dans la ligne de stats).
     const meters = [];
-    const push = (key, label, used, tokens, limit, resetSec, resetText) => {
+    const push = (key, label, used, tokens, limit, resetSec, resetText, official) => {
       meters.push({
-        key, label, used, tokens, limit: limit.v, auto: limit.auto,
-        pct: limit.v > 0 ? (used / limit.v) * 100 : 0, resetSec, resetText,
+        key, label, used, tokens,
+        limit: official ? null : limit.v,
+        auto: official ? false : limit.auto,
+        official: !!official,
+        pct: official ? official.pct : (limit.v > 0 ? (used / limit.v) * 100 : 0),
+        resetSec, resetText,
       });
     };
-    push('session', 'SESSION 5h', active ? active.sum.val : 0,
-      active ? active.sum.i + active.sum.o + active.sum.cw + active.sum.cr : 0,
-      lim('session', maxBlock), active ? (active.end - now) / 1000 : null, active ? null : 'idle');
-    const nextMidnight = dayStart + 86400 * 1000;
-    push('day', 'DAY', day.val, day.i + day.o + day.cw + day.cr,
-      lim('day', maxDay), (nextMidnight - now) / 1000, null);
-    push('week', 'WEEK', week.val, week.i + week.o + week.cw + week.cr,
-      lim('week', maxWeek), weekReset ? (weekReset - now) / 1000 : null, weekReset ? null : '7d rolling');
+    const estBlockVal = active ? active.sum.val : 0;
+    const estBlockTok = active ? active.sum.i + active.sum.o + active.sum.cw + active.sum.cr : 0;
+    if (off5) {
+      push('session', 'SESSION 5h', estBlockVal, estBlockTok, null,
+        (off.reset5h - now) / 1000, null, { pct: off.u5h * 100 });
+    } else {
+      push('session', 'SESSION 5h', estBlockVal, estBlockTok,
+        lim('session', maxBlock, estBlockVal),
+        active ? (active.end - now) / 1000 : null, active ? null : 'idle');
+    }
+    if (off7) {
+      push('week', 'WEEK', week.val, week.i + week.o + week.cw + week.cr, null,
+        (off.reset7d - now) / 1000, null, { pct: off.u7d * 100 });
+    } else {
+      push('week', 'WEEK', week.val, week.i + week.o + week.cw + week.cr,
+        lim('week', maxWeek, week.val),
+        weekReset ? (weekReset - now) / 1000 : null, weekReset ? null : '7d rolling');
+    }
     push('premium', premiumFam.toUpperCase() + ' 7d', premium.val, premium.i + premium.o + premium.cw + premium.cr,
-      lim('premium', maxPremium), weekReset ? (weekReset - now) / 1000 : null, weekReset ? null : '7d rolling');
+      lim('premium', maxPremium, premium.val),
+      weekReset ? (weekReset - now) / 1000 : null, weekReset ? null : '7d rolling');
 
     // Débit et projection de fin de bloc
     const burnPerMin = hour.val / 60;
     const burnTokPerMin = (hour.i + hour.o + hour.cw + hour.cr) / 60;
     let projPct = null;
-    if (active && meters[0].limit > 0) {
-      const remainMin = (active.end - now) / 60000;
-      projPct = ((active.sum.val + burnPerMin * remainMin) / meters[0].limit) * 100;
+    const sess = meters[0];
+    if (active) {
+      const remainMin = ((off5 ? off.reset5h : active.end) - now) / 60000;
+      if (sess.official && estBlockVal > 0) {
+        // règle de trois sur le pourcentage officiel, au rythme de dépense actuel
+        projPct = sess.pct * (1 + (burnPerMin * Math.max(0, remainMin)) / estBlockVal);
+      } else if (!sess.official && sess.limit > 0) {
+        projPct = ((estBlockVal + burnPerMin * Math.max(0, remainMin)) / sess.limit) * 100;
+      }
     }
 
     return {
       meters, metric, premiumFam,
       burnPerMin, burnTokPerMin, projPct,
       day, byFamDay,
+      officialAt: off ? off.at : 0,
+      officialUsed: off5 || off7,
       entryCount: this.entries.size,
       lastScanAt: this.lastScanAt,
       lastError: this.lastError,

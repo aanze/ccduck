@@ -176,11 +176,11 @@ const SPR = {
 const SPR_W = 16, SPR_H = 12;
 const WATER = 0x7FD4F5;
 
-const QUACKS = ['quack quack', 'quack !', 'all good', 'just floating', 'debug time', 'squeak'];
-const ZENS = ['zzz…', 'so calm', 'quack… zzz'];
-const BREATHERS = ['ok ok… breathe', 'quick lap', 'still bad tho…', 'phew.'];
-const FOOD_SPOT = ['ooh, seeds !', 'snack time !', 'FOOD !'];
-const NOMS = ['nom nom nom', 'crunch crunch', 'so good', '♥'];
+// Le canard ne commente pas ses activités : onomatopées uniquement.
+// Seuls les avertissements de limites (alerte/panique) ont droit à du texte.
+const QUACKS = ['quack', 'quack quack', 'squeak', 'wak wak'];
+const ZENS = ['zzz…', 'quack… zzz'];
+const NOMS = ['nom nom nom', 'crunch crunch', '♥'];
 
 function rand(a, b) { return a + Math.random() * (b - a); }
 function pick(arr) { return arr[Math.floor(Math.random() * arr.length)]; }
@@ -232,7 +232,6 @@ class Duck {
     }
     while (this.seeds.length > 28) this.seeds.shift();
     this.feedCooldownUntil = 0; // de la bouffe fraîche, irrésistible
-    if (Math.random() < 0.8) this.say(pick(['incoming !', 'ooh !']), 'calm', 1.2);
   }
 
   headX() { return this.dir < 0 ? this.x + 2 : this.x + SPR_W - 3; }
@@ -270,7 +269,8 @@ class Duck {
     else if (name === 'sleep') { a.until = t + (mode === 'zen' ? rand(6, 12) : rand(3.5, 6)); }
     else if (name === 'quack') {
       a.until = t + 0.8;
-      if (!breakMode && Math.random() < 0.7) this.say(pick(mode === 'zen' ? ZENS : QUACKS), 'calm', 2.2);
+      // y compris pendant les tours de bassin en alerte/panique : un quack de temps en temps
+      if (Math.random() < 0.7) this.say(pick(mode === 'zen' ? ZENS : QUACKS), 'calm', 2.2);
     }
     a.x = Math.max(minX, Math.min(maxX, a.x));
     return a;
@@ -331,14 +331,13 @@ class Duck {
     if (!landed.length || t < this.feedCooldownUntil) { this.feeding = null; return false; }
     if (!this.feeding) {
       this.feeding = { until: t + rand(10, 16) };
-      this.say(pick(FOOD_SPOT), 'calm', 2);
+      if (Math.random() < 0.5) this.say('quack !', 'calm', 1.2);
       this.act = null;
     }
     if (t > this.feeding.until) {
       // il a assez mangé pour l'instant, le reste flottera
       this.feeding = null;
       this.feedCooldownUntil = t + rand(9, 16);
-      this.say(pick(['back to work', 'later, seeds']), 'calm', 1.6);
       return false;
     }
     // graine la plus proche du bec
@@ -362,7 +361,7 @@ class Duck {
           x: best.x + rand(-1, 1), y: SPR_H - 1 - rand(0, 1),
           vx: rand(-2, 2), vy: -rand(1, 3), ch: pick(['·', '˙']), fg: SEED, life: rand(0.3, 0.6), rel: false,
         });
-        if (Math.random() < 0.35) this.say(pick(NOMS), 'calm', 1.4);
+        if (Math.random() < 0.22) this.say(pick(NOMS), 'calm', 1.4);
       }
     }
     return true;
@@ -391,15 +390,17 @@ class Duck {
       // en train de manger : la panique attendra
     } else if (busy) {
       // ---- cycle : pointer longuement la jauge, puis souffler, puis y retourner ----
+      // ctx.soft (jauge premium) : phases de pointage plus courtes, pauses plus longues
       const isPanic = ctx.mode === 'panic';
-      if (!this.phase) this.phase = { name: 'point', until: t + (isPanic ? rand(20, 30) : rand(15, 25)) };
+      const pointDur = () => isPanic ? rand(20, 30) : ctx.soft ? rand(9, 15) : rand(15, 25);
+      const breakDur = () => isPanic ? rand(8, 14) : ctx.soft ? rand(14, 22) : rand(10, 18);
+      if (!this.phase) this.phase = { name: 'point', until: t + pointDur() };
       if (t > this.phase.until) {
         if (this.phase.name === 'point') {
-          this.phase = { name: 'break', until: t + (isPanic ? rand(8, 14) : rand(10, 18)) };
+          this.phase = { name: 'break', until: t + breakDur() };
           this.act = null;
-          this.say(pick(BREATHERS), isPanic ? 'alert' : 'calm', 2.2);
         } else {
-          this.phase = { name: 'point', until: t + (isPanic ? rand(20, 30) : rand(15, 25)) };
+          this.phase = { name: 'point', until: t + pointDur() };
           if (isPanic) this.say('QUACK !!', 'panic', 1.6);
           this.nextBubbleAt = t + 1;
         }
@@ -411,7 +412,7 @@ class Duck {
         this.moveToward(target + Math.sin(t * 11) * 3, 24, dt, minX, maxX);
         this.frame = (Math.floor(t / 0.12) % 2 === 0) ? 'panicA' : 'panicB';
         if (t > this.nextBubbleAt) {
-          this.say(pick([`!! ${ctx.worstLabel} ${Math.round(ctx.worstPct)}% !!`, 'QUACK QUACK !!', 'OVERFLOW !']), 'panic', 1.8);
+          this.say(pick([`!! ${ctx.worstLabel} ${Math.round(ctx.worstPct)}% !!`, 'QUACK QUACK !!']), 'panic', 1.8);
           this.nextBubbleAt = t + rand(2, 3.2);
         }
         if (Math.random() < dt * 10) this.spawn({

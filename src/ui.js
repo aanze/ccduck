@@ -48,7 +48,10 @@ function meterLayout(cols) {
   return { labelW, figsW, resetW, barW, barX0: labelW + 1 };
 }
 
-// Positions des pointes de jauges + pire jauge (pour cibler le canard).
+// Positions des pointes de jauges + jauge qui pilote l'humeur du canard.
+// La jauge premium (fable/opus) ne déclenche jamais la vraie panique : les autres
+// modèles restent utilisables, on plafonne sa sévérité à l'alerte (douce).
+const RANK = { zen: 0, calm: 1, alert: 2, panic: 3 };
 function metersGeometry(snap, cols, cfg) {
   const L = meterLayout(cols);
   let worst = null;
@@ -56,10 +59,18 @@ function metersGeometry(snap, cols, cfg) {
     const pct = Math.max(0, m.pct);
     const fill = Math.min(1, pct / 100) * L.barW;
     const tip = L.barX0 + Math.max(0, Math.min(L.barW - 1, Math.floor(fill)));
-    if (!worst || pct > worst.pct) worst = { pct, tip, label: m.label, idx };
+    let eff = levelOf(pct, cfg);
+    if (m.key === 'premium' && eff === 'panic') eff = 'alert';
+    if (!worst || RANK[eff] > RANK[worst.eff] || (RANK[eff] === RANK[worst.eff] && pct > worst.pct)) {
+      worst = { pct, tip, label: m.label, idx, eff, key: m.key };
+    }
     return tip;
   });
-  return { L, tips, worst, level: worst ? levelOf(worst.pct, cfg) : 'calm' };
+  return {
+    L, tips, worst,
+    level: worst ? worst.eff : 'calm',
+    soft: !!(worst && worst.key === 'premium'),
+  };
 }
 
 function drawMeter(scr, y, m, L, cfg, blinkOn, isWorst) {
@@ -85,8 +96,9 @@ function drawMeter(scr, y, m, L, cfg, blinkOn, isWorst) {
   scr.text(x, y, fmtPct(pct), color, null, pctAt);
   x += 5;
   if (L.figsW) {
-    const lim = (m.auto ? '≈' : '') + fmtMetric(m.limit, snapMetric);
-    let figs = fmtMetric(m.used, snapMetric) + '/' + lim;
+    let figs;
+    if (m.official) figs = '• ' + fmtMetric(m.used, snapMetric); // % officiel, dépense estimée à côté
+    else figs = fmtMetric(m.used, snapMetric) + '/' + (m.auto ? '≈' : '') + fmtMetric(m.limit, snapMetric);
     if (L.figsW >= 20) figs += ' · ' + fmtTok(m.tokens);
     scr.text(x, y, padR(clip(figs, L.figsW), L.figsW), C.dim);
     x += L.figsW + 1;
@@ -193,14 +205,14 @@ function draw(scr, state) {
   scr.clear();
   const cols = scr.cols, rows = scr.rows;
 
-  if (rows < 18 || cols < 46) return drawMini(scr, state);
+  if (rows < 17 || cols < 46) return drawMini(scr, state);
 
   // ---- répartition verticale ----
-  // fixe: header(1) sep(1) meters(4) ind(1) bubble(1) canvas(n) water(1) sep(1) stats(1) footer(1)
+  // fixe: header(1) sep(1) meters(3) ind(1) bubble(1) canvas(n) water(1) sep(1) stats(1) footer(1)
   let canvasRows = 6;
   let tableRows = 0;
   const famCount = Math.min(4, Object.keys(snap.byFamDay).length || 1);
-  const baseNeed = 12; // tout sauf canvas et tableau
+  const baseNeed = 11; // tout sauf canvas et tableau
   if (ui.showTable && rows >= baseNeed + canvasRows + 1 + famCount + 1) tableRows = 1 + famCount;
   let spare = rows - (baseNeed + canvasRows + tableRows);
   if (spare < 0) { canvasRows = Math.max(6, canvasRows + spare); spare = 0; }
@@ -252,6 +264,7 @@ function draw(scr, state) {
     scr.text(1, y, 'no Claude Code data found in ~/.claude/projects', C.orange);
   } else {
     const parts = [];
+    parts.push('today ' + fmtMetric(snap.day.val, snap.metric));
     parts.push('burn ' + (snap.metric === 'cost' ? fmtCost(snap.burnPerMin * 60) + '/h' : fmtTok(snap.burnTokPerMin) + ' tok/min'));
     if (snap.metric === 'cost') parts.push(fmtTok(snap.burnTokPerMin) + ' tok/min');
     if (snap.projPct != null) parts.push('proj. block ' + Math.round(snap.projPct) + '%');
@@ -272,7 +285,14 @@ function draw(scr, state) {
     scr.text(1, fy, clip('⚠ ' + snap.lastError, cols - 2), C.red);
   } else {
     const keys = '[q]uit [f]eed [r]efresh [m]etric:' + ui.metricLabel + ' [c]table [d]emo' + (ui.paused ? ' ▮▮' : '');
-    const lim = snap.meters.some((m) => m.auto) ? 'limits ≈auto (' + cfg.historyDays + 'd)' : 'limits: config';
+    const bits = [];
+    if (snap.officialUsed) {
+      const age = Date.now() - snap.officialAt;
+      bits.push('• /usage' + (age > 30 * 60 * 1000 ? ' (' + fmtDur(age / 1000) + ' old)' : ''));
+    }
+    if (snap.meters.some((m) => m.auto)) bits.push('≈ auto (' + cfg.historyDays + 'd)');
+    else if (!snap.officialUsed) bits.push('limits: config');
+    const lim = bits.join(' · ');
     scr.text(1, fy, clip(keys + '  ·  ' + lim, cols - 2), C.faint);
   }
   return geo;

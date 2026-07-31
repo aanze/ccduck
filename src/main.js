@@ -50,7 +50,7 @@ function applyDemo(snap, demo, tSec) {
   if (demo == null) return snap;
   let v = typeof demo === 'number' ? demo : 30 + ((Math.sin(tSec * 0.28) + 1) / 2) * 68;
   v = Math.max(1, Math.min(130, v));
-  const offsets = { session: -16, day: -9, week: 0, premium: -5 };
+  const offsets = { session: -16, week: 0, premium: -5 };
   const meters = snap.meters.map((m) => {
     const pct = Math.max(3, v + (offsets[m.key] || 0));
     return { ...m, pct, used: (m.limit * pct) / 100 };
@@ -87,7 +87,7 @@ function run(argv) {
     const duck = new Duck(cols);
     duck.x = Math.round(cols / 2 - 8);
     const geo = ui.metersGeometry(snap, cols, cfg);
-    duck.update(0.01, { mode: geo.level, targetX: geo.worst ? geo.worst.tip : cols / 2, worstLabel: geo.worst ? geo.worst.label : '', worstPct: geo.worst ? geo.worst.pct : 0, canvasW: cols });
+    duck.update(0.01, { mode: geo.level, targetX: geo.worst ? geo.worst.tip : cols / 2, worstLabel: geo.worst ? geo.worst.label : '', worstPct: geo.worst ? geo.worst.pct : 0, soft: geo.soft, canvasW: cols });
     ui.draw(screen, {
       snap, cfg, tSec: 1.3, blinkOn: true,
       duckInfo: duck.renderInfo(), bubble: duck.bubble,
@@ -107,7 +107,7 @@ function run(argv) {
       t += 0.1;
       const snap = applyDemo(store.snapshot(Date.now(), metric), opts.demo ?? null, t);
       const geo = ui.metersGeometry(snap, cols, cfg);
-      duck.update(0.1, { mode: geo.level, targetX: geo.worst ? geo.worst.tip : cols / 2, worstLabel: geo.worst ? geo.worst.label : '', worstPct: geo.worst ? geo.worst.pct : 0, canvasW: cols });
+      duck.update(0.1, { mode: geo.level, targetX: geo.worst ? geo.worst.tip : cols / 2, worstLabel: geo.worst ? geo.worst.label : '', worstPct: geo.worst ? geo.worst.pct : 0, soft: geo.soft, canvasW: cols });
       ui.draw(screen, {
         snap, cfg, tSec: t, blinkOn: Math.floor(t / 0.4) % 2 === 0,
         duckInfo: duck.renderInfo(), bubble: duck.bubble,
@@ -130,8 +130,6 @@ function run(argv) {
   let lastFrame = '';
   let lastTick = Date.now();
   let quitting = false;
-
-  duck.say('counting your tokens…', 'calm', 4);
 
   const refreshSnap = () => { snap = store.snapshot(Date.now(), metric); };
 
@@ -169,7 +167,6 @@ function run(argv) {
       else if (k === 'p' || k === 'P' || k === ' ') { paused = !paused; }
       else if (k === 'd' || k === 'D') {
         demo = demo == null ? 75 : demo === 75 ? 93 : demo === 93 ? 'sweep' : null;
-        if (demo == null) duck.say('back to reality', 'calm', 2);
       }
     });
   }
@@ -205,6 +202,7 @@ function run(argv) {
       targetX: geo.worst ? geo.worst.tip : cols / 2,
       worstLabel: geo.worst ? geo.worst.label.replace(/ .*/, '') : '',
       worstPct: geo.worst ? geo.worst.pct : 0,
+      soft: geo.soft,
       canvasW: cols,
     });
     ui.draw(screen, {
