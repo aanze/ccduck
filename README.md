@@ -10,9 +10,9 @@ jaune en pixel art qui vit sa vie sur l'eau… et panique quand tes limites appr
   $/h et tok/min, projection de fin de bloc, messages du jour, part des sous-agents,
   tableau par modèle
 - **La mascotte** vit sa vie : elle nage avec un sillage, dérive, barbote tête sous l'eau,
-  se lisse les plumes, dort (souvent quand tout est sous 30 %) et ne s'exprime qu'en
-  onomatopées (« quack », « zzz… ») — seuls les avertissements de limites ont droit à du
-  texte. Dès qu'une jauge passe **70 %**, elle court se placer sous la pointe de la jauge
+  se lisse les plumes, dort (siestes jusqu'à 1 min quand tout est sous 30 %, 30 s sinon)
+  et ne s'exprime qu'en onomatopées (« quack », « zzz… ») — seuls les avertissements de
+  limites ont droit à du texte. Dès qu'une jauge passe **70 %**, elle court se placer sous la pointe de la jauge
   fautive et la pointe de l'aile ; à **90 %** c'est la **panique** — par phases de 20-30 s,
   entrecoupées d'un tour du bassin ponctué de « quack », puis ça repart. Exception : la
   jauge premium (FABLE/OPUS) ne déclenche qu'une **alerte douce**, jamais la panique —
@@ -28,6 +28,11 @@ jaune en pixel art qui vit sa vie sur l'eau… et panique quand tes limites appr
   s'en décrocher le bec, bulle imagée à l'appui, et elle repasse toutes les 1 à 2 min
   jusqu'à ce qu'on cède. Deux poses marquées ne s'enchaînent jamais d'une image à
   l'autre : elle se redresse toujours entre les deux.
+- **La météo** s'invite : toutes les 7 à 25 min, une **averse** de 30 s à 5 min traverse
+  le bassin (gouttes devant le canard, éclaboussures sur l'eau). Au bout de quelques
+  secondes elle lève le bec vers le ciel, regarde à gauche puis à droite, et se met à
+  barboter comme une folle en s'éclaboussant — 10 s au plus, renouvelable tant qu'il
+  pleut mais jamais deux fois de suite sans 30 s de répit.
 - Optimisé pour le panneau terminal étroit de la fenêtre Claude Code (56 colonnes et plus,
   mode mini en dessous), zéro dépendance, Node ≥ 18. UI en anglais.
 
@@ -54,7 +59,7 @@ Un paquet npm prêt à l'emploi est fourni dans [`dist/`](dist/) (et attaché au
 Releases GitHub). Télécharger le `.tgz` puis :
 
 ```bash
-npm install -g ./ccduck-1.10.0.tgz
+npm install -g ./ccduck-1.11.0.tgz
 ```
 
 (Copie figée : pour mettre à jour, réinstaller le `.tgz` de la version suivante.)

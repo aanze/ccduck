@@ -213,6 +213,21 @@ const SPR = {
     '..yyYYYYYYYyy...',
     '...yyyyyyyyy....',
   ]),
+  // bec en l'air : il savoure l'averse (on le retourne pour qu'il regarde des deux côtés)
+  billUp: F([
+    '................',
+    '..O.HHYY........',
+    '..OOHYKYY.......',
+    '...HYYYYY.......',
+    '...YYYYYY.......',
+    '..yYYYYYy.......',
+    '...YYYYYYYYYYH..',
+    '..YYYYYYyyyYYYY.',
+    '.yYYYYYYyyyyYYY.',
+    '.yYYYYYYYyyYYy..',
+    '..yyYYYYYYYyy...',
+    '...yyyyyyyyy....',
+  ]),
   lookA: F([
     '................',
     '..O.HHYY........',
@@ -301,7 +316,18 @@ const POSED = new Set(['dabble', 'preen', 'sleep', 'gaze']);
 // Même idée côté image : tant qu'il tient une de ces poses (ou qu'il panique),
 // on ne lui superpose pas la pose de la crotte.
 const POSE_FRAMES = new Set(['dabble', 'preen', 'sleep', 'front', 'frontBlink', 'frontQuack',
-  'panicA', 'panicB', 'poopA', 'poopB', 'begA', 'begB']);
+  'panicA', 'panicB', 'poopA', 'poopB', 'begA', 'begB', 'billUp']);
+
+// Météo : une averse de temps en temps, rare et longue. Elle ne change rien aux
+// chiffres, seulement l'ambiance — et l'humeur du canard.
+// CCDUCK_RAIN_EVERY raccourcit l'attente entre deux averses (mise au point).
+const RAIN_TEST = Number(process.env.CCDUCK_RAIN_EVERY) || 0;
+const RAIN_EVERY = RAIN_TEST ? [RAIN_TEST, RAIN_TEST * 2] : [420, 1500]; // 7 à 25 min
+const RAIN_LEN = [30, 300];    // l'averse dure de 30 s à 5 min
+const JOY_AFTER = [3, 6];      // le temps qu'il s'en aperçoive
+const JOY_LEN = [6.5, 10];     // une session de joie, 10 s au plus
+const JOY_GAP = [30, 50];      // et jamais deux sessions à moins de 30 s d'écart
+const JOYS = ['♥', 'quack quack !', '♥ ♥'];
 
 // Faim : sans repas depuis HUNGRY_AFTER, il vient réclamer plein cadre et remet
 // ça toutes les 1-2 min tant qu'on ne lui a rien donné. Barboter ne compte pas :
@@ -348,6 +374,10 @@ class Duck {
     this.lastMealAt = 0;        // dernier vrai repas (graine/gélule) — jauge de faim
     this.nextBegAt = 0;
     this.beg = null;            // {phase:'come'|'face', until, comeUntil, nextQuack}
+    this.rain = null;           // {since, until} — averse en cours
+    this.nextRainAt = rand(RAIN_EVERY[0], RAIN_EVERY[1]);
+    this.joy = null;            // {lookUntil, endAt, nextTurn, wx} — session de joie sous la pluie
+    this.nextJoyAt = 0;
     this.eatT = 0;
     this.hop = 0;
     this.t = 0;
@@ -403,7 +433,9 @@ class Duck {
       // pause pendant l'alerte/panique : on fait le tour du bassin, pas de sieste
       weights = [['swim', 58], ['drift', 14], ['dabble', 14], ['quack', 14]];
     } else if (mode === 'zen') {
-      weights = [['drift', 30], ['sleep', 30], ['dabble', 10], ['preen', 10], ['swim', 10], ['quack', 6]];
+      // sleep pèse peu alors que les siestes zen sont longues (jusqu'à 1 min) :
+      // au-delà, il passerait les deux tiers du temps les yeux fermés
+      weights = [['drift', 30], ['sleep', 10], ['dabble', 10], ['preen', 10], ['swim', 10], ['quack', 6]];
     } else {
       weights = [['swim', 34], ['drift', 16], ['dabble', 14], ['preen', 10], ['quack', 10], ['sleep', 6]];
     }
@@ -430,7 +462,8 @@ class Duck {
     } else if (name === 'drift') { a.x = this.x + rand(-6, 6); a.speed = 1.2; a.until = t + rand(3, 7); }
     else if (name === 'dabble') { a.until = t + rand(1.6, 3); }
     else if (name === 'preen') { a.until = t + rand(1.8, 3.2); }
-    else if (name === 'sleep') { a.until = t + (mode === 'zen' ? rand(6, 12) : rand(3.5, 6)); }
+    // vraies siestes : jusqu'à 1 min quand tout est au vert, 30 s sinon
+    else if (name === 'sleep') { a.until = t + (mode === 'zen' ? rand(6, 60) : rand(3.5, 30)); }
     else if (name === 'quack') {
       a.until = t + 0.8;
       // y compris pendant les tours de bassin en alerte/panique : un quack de temps en temps
@@ -542,6 +575,73 @@ class Duck {
     this.spawn({ x: tailX, y: SPR_H - 1, vx: rand(-1, 1), vy: -rand(1, 2), ch: '∘', fg: WATER, life: 0.4, rel: false });
     this.hop = 1.4;  // petit sursaut de soulagement
     if (Math.random() < 0.5) this.say('plop', 'calm', 1.1);
+  }
+
+  // Météo : rien d'autre qu'un minuteur. L'averse tombe rarement et dure
+  // longtemps ; le rendu des gouttes est côté ui, qui connaît la géométrie.
+  updateWeather() {
+    const t = this.t;
+    if (this.rain) {
+      if (t <= this.rain.until) return;
+      this.rain = null;
+      this.joy = null;
+      this.nextRainAt = t + rand(RAIN_EVERY[0], RAIN_EVERY[1]);
+      return;
+    }
+    if (t < this.nextRainAt) return;
+    this.rain = { since: t, until: t + rand(RAIN_LEN[0], RAIN_LEN[1]) };
+    // il lui faut quelques secondes pour s'apercevoir qu'il pleut
+    this.nextJoyAt = Math.max(this.nextJoyAt, t + rand(JOY_AFTER[0], JOY_AFTER[1]));
+  }
+
+  // Intensité de l'averse : elle s'installe et se calme progressivement.
+  rainStrength() {
+    if (!this.rain) return 0;
+    const t = this.t;
+    return Math.max(0, Math.min(1, (t - this.rain.since) / 4, (this.rain.until - t) / 4));
+  }
+
+  // Une session de joie s'il pleut, qu'il n'est pas occupé, et que la précédente
+  // remonte à au moins JOY_GAP.
+  maybeJoy() {
+    const t = this.t;
+    if (this.joy || !this.rain || this.feeding || this.beg) return;
+    if (t < this.nextJoyAt || POSE_FRAMES.has(this.frame)) return;
+    if (this.rain.until - t < 3) return;         // averse finissante : pas la peine
+    this.joy = {
+      lookUntil: t + rand(2, 3), endAt: t + rand(JOY_LEN[0], JOY_LEN[1]),
+      nextTurn: 0, wx: this.x, said: false,
+    };
+    this.act = null;
+  }
+
+  // Joie sous la pluie : bec en l'air, il regarde à gauche et à droite, puis
+  // barbote deux fois plus vite que d'habitude en s'éclaboussant.
+  runJoy(dt, minX, maxX) {
+    const t = this.t, j = this.joy;
+    if (t > j.endAt || !this.rain) {
+      this.joy = null;
+      this.nextJoyAt = t + rand(JOY_GAP[0], JOY_GAP[1]);
+      return;
+    }
+    if (t < j.lookUntil) {
+      this.frame = 'billUp';
+      if (t > j.nextTurn) { this.dir = -this.dir; j.nextTurn = t + rand(0.6, 0.9); }
+      return;
+    }
+    if (!j.said) {
+      j.said = true;
+      if (Math.random() < 0.6) this.say(pick(JOYS), 'calm', 1.8);
+    }
+    // barbotage rapide (0,22 s contre 0,45 s au picorage) + gigotage sur place
+    this.frame = (Math.floor(t / 0.22) % 2 === 0) ? 'dabble' : 'stand';
+    if (t > j.nextTurn) { j.wx = this.x + rand(-5, 5); j.nextTurn = t + rand(0.8, 1.4); }
+    this.moveToward(j.wx, 7, dt, minX, maxX);
+    if (Math.random() < dt * 1.6) this.hop = 2.2;
+    if (Math.random() < dt * 14) this.spawn({
+      x: this.x + rand(1, SPR_W - 1), y: SPR_H - rand(0, 2),
+      vx: rand(-4, 4), vy: -rand(2, 6), ch: pick(['∘', '·', '°']), fg: WATER, life: rand(0.3, 0.8), rel: false,
+    });
   }
 
   // Déclenche une réclamation si le ventre crie famine et qu'il n'est pas déjà
@@ -656,6 +756,7 @@ class Duck {
     }
 
     this.updateSeeds(dt);
+    this.updateWeather();   // avant le sédatif : il pleut aussi sur un canard qui dort
 
     // Sous sédatif : dodo paisible, imperméable aux jauges comme aux graines.
     if (t < this.sedatedUntil) {
@@ -676,6 +777,7 @@ class Duck {
 
     this.maybePoop();
     this.maybeBeg();
+    this.maybeJoy();
 
     const target = Math.max(minX, Math.min(maxX, (ctx.targetX || ctx.canvasW / 2) - SPR_W / 2));
     const busy = ctx.mode === 'alert' || ctx.mode === 'panic';
@@ -685,6 +787,8 @@ class Duck {
       this.beg = null;                 // à table, plus rien à réclamer
     } else if (this.beg) {
       this.runBeg(dt, minX, maxX);
+    } else if (this.joy) {
+      this.runJoy(dt, minX, maxX);
     } else if (busy) {
       // ---- cycle : pointer longuement la jauge, puis souffler, puis y retourner ----
       // ctx.soft (jauge premium) : phases de pointage plus courtes, pauses plus longues
@@ -760,7 +864,8 @@ class Duck {
       yOff = Math.round(((Math.sin(this.t * 2.1) + 1) / 2) * 1.4);
     }
     yOff -= Math.round(this.hop);
-    return { rows, mirror, x: Math.round(this.x), yOff, particles: this.particles, seeds: this.seeds, pills: this.pills, poops: this.poops, t: this.t };
+    return { rows, mirror, x: Math.round(this.x), yOff, particles: this.particles, seeds: this.seeds,
+      pills: this.pills, poops: this.poops, t: this.t, rain: this.rainStrength() };
   }
 }
 

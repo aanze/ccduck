@@ -191,6 +191,30 @@ function drawCanvas(scr, top, rowsN, duckInfo, t) {
   }
 }
 
+// Averse : gouttes procédurales, à la manière de l'eau — aucun état à stocker,
+// tout se déduit de l'index de la goutte et du temps. Dessinée en dernier : la
+// pluie passe devant le canard, et les gouttes qui touchent l'eau éclaboussent.
+function rainHash(i) {
+  let x = (i * 2654435761) >>> 0;
+  x ^= x >>> 15; x = (x * 2246822519) >>> 0; x ^= x >>> 13;
+  return x >>> 0;
+}
+function drawRain(scr, top, rowsN, waterY, strength, t) {
+  if (!(strength > 0)) return;
+  const W = scr.cols;
+  const span = rowsN + 1;                       // du haut du bassin à la ligne d'eau
+  const n = Math.round(W * 0.2 * strength);
+  for (let i = 0; i < n; i++) {
+    const x0 = rainHash(i) % W;
+    const speed = 9 + (rainHash(i + 101) % 7);  // lignes/s
+    const phase = (rainHash(i + 7919) % 997) / 997;
+    const y = Math.floor(((t * speed / span + phase) % 1) * span);
+    if (y >= span - 1) { scr.set(x0, waterY, '∘', C.cyan); continue; }
+    const x = ((x0 - (y >> 1)) % W + W) % W;    // la trajectoire suit la pente du glyphe
+    scr.set(x, top + y, '╱', i % 3 === 0 ? C.cyan : C.water1, null, i % 2 ? A_DIM : 0);
+  }
+}
+
 function drawWater(scr, y, t, duckX) {
   for (let x = 0; x < scr.cols; x++) {
     const phase = (x + Math.floor(t * CURRENT)) % 8;
@@ -298,6 +322,7 @@ function draw(scr, state) {
   drawCanvas(scr, canvasTop, canvasRows, state.duckInfo, tSec);
   const waterY = canvasTop + canvasRows;
   drawWater(scr, waterY, tSec, state.duckInfo.x);
+  drawRain(scr, canvasTop, canvasRows, waterY, state.duckInfo.rain || 0, tSec);
   y = waterY + 1;
   scr.hline(y++, 0, cols - 1, '─', C.faint);
 
