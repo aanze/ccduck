@@ -249,9 +249,12 @@ function draw(scr, state) {
   const sub = 'Claude tokens' + (cfg.planLabel ? ' · ' + cfg.planLabel : '');
   scr.text(hx, y, clip(sub, cols - hx - 20), C.dim);
   if (ui.demoLabel) scr.text(hx + sub.length + 1, y, ' ' + ui.demoLabel + ' ', C.red, null, A_REV | A_BOLD);
-  const ago = snap.lastScanAt ? Math.max(0, Math.round((Date.now() - snap.lastScanAt) / 1000)) : null;
-  const right = fmtClock(new Date()) + (ago != null ? ' · upd ' + ago + 's' : '');
-  scr.text(cols - right.length - 1, y, right, C.faint);
+  // âge de la donnée OFFICIELLE (pas du rescan des transcripts) : c'est elle que
+  // portent les jauges, donc c'est sa fraîcheur qui doit être affichée
+  const usageAge = snap.officialAt ? Math.round((Date.now() - snap.officialAt) / 1000) : null;
+  const right = fmtClock(new Date()) + (usageAge != null ? ' · usage ' + fmtDur(usageAge) : '');
+  const stale = usageAge != null && usageAge > 300;
+  scr.text(cols - right.length - 1, y, right, stale ? C.orange : C.faint);
   y++;
   scr.hline(y++, 0, cols - 1, '─', C.faint);
 
@@ -309,13 +312,10 @@ function draw(scr, state) {
   } else {
     const keys = '[q]uit [f]eed [s]edate [r]efresh [m]etric:' + ui.metricLabel + ' [c]table [d]emo' + (ui.paused ? ' ▮▮' : '');
     const bits = [];
-    if (snap.officialUsed) {
-      const age = Date.now() - snap.officialAt;
-      bits.push('• /usage' + (age > 5 * 60 * 1000 ? ' (' + fmtDur(age / 1000) + ' old)' : ''));
-    }
+    if (snap.officialUsed) bits.push('• /usage');
     if (snap.meters.some((m) => m.auto)) bits.push('≈ auto (' + cfg.historyDays + 'd)');
     else if (!snap.officialUsed) bits.push('limits: config');
-    if (snap.officialErr && snap.meters.some((m) => !m.official)) {
+    if (snap.officialErr) {
       bits.push('usage: ' + snap.officialErr + (snap.officialRetryIn > 0 ? ' (retry ' + fmtDur(snap.officialRetryIn / 1000) + ')' : ''));
     }
     const lim = bits.join(' · ');

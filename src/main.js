@@ -90,8 +90,7 @@ async function run(argv) {
       lastErr: o.lastErr, data: o.data, premium: o.premium,
     }, null, 2));
     console.log('\nforcing live call… (note: consumes the endpoint\'s small rate budget — avoid repeating)');
-    o.nextTryAt = 0;
-    await store.refreshOfficial();
+    await store.refreshOfficial(true);
     console.log(o.raw ? JSON.stringify(o.raw, null, 2) : 'live call failed: ' + (o.lastErr || 'unknown'));
     return;
   }
@@ -152,10 +151,10 @@ async function run(argv) {
   const refreshSnap = () => { snap = store.snapshot(Date.now(), metric); };
   // Compteurs officiels : l'intervalle réel est géré dans refreshOfficial (2 min,
   // backoff sur 429) — ici on se contente de la solliciter régulièrement.
-  const pokeOfficial = () => {
-    store.refreshOfficial().then(() => { if (!pendingScan) refreshSnap(); }).catch(() => {});
+  const pokeOfficial = (force) => {
+    store.refreshOfficial(force).then(() => { if (!pendingScan) refreshSnap(); }).catch(() => {});
   };
-  pokeOfficial();
+  pokeOfficial(true);
 
   const cleanup = () => {
     if (quitting) return;
@@ -186,8 +185,7 @@ async function run(argv) {
       if (k === 'q' || k === 'Q' || k === '\x03') { cleanup(); process.exit(0); }
       else if (k === 'r' || k === 'R') {
         if (!pendingScan) pendingScan = store.scanSteps();
-        store.official.nextTryAt = 0; // r = je veux les vrais chiffres maintenant
-        pokeOfficial();
+        pokeOfficial(true); // r = je veux les vrais chiffres maintenant
       }
       else if (k === 'm' || k === 'M') { metric = METRICS[(METRICS.indexOf(metric) + 1) % METRICS.length]; refreshSnap(); }
       else if (k === 'f' || k === 'F') { duck.feed(); }

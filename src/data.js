@@ -45,10 +45,13 @@ function readOAuthToken(env) {
 // État persisté des compteurs officiels : survit aux relances de ccduck, pour
 // réafficher la dernière valeur connue ET respecter le backoff (l'endpoint 429
 // sévèrement — chaque relance ne doit PAS refaire un appel à froid).
-function officialStatePath() { return path.join(os.homedir(), '.ccduck-usage.json'); }
+// CCDUCK_STATE permet de dérouter l'état (tests : ne jamais écrire dans le vrai fichier)
+function officialStatePath() {
+  return process.env.CCDUCK_STATE || path.join(os.homedir(), '.ccduck-usage.json');
+}
 
 function loadOfficialState() {
-  const base = { data: null, premium: null, fetchedAt: 0, nextTryAt: 0, lastErr: null, inFlight: false };
+  const base = { data: null, premium: null, fetchedAt: 0, nextTryAt: 0, lastErr: null, fails: 0, inFlight: false };
   try {
     const j = JSON.parse(fs.readFileSync(officialStatePath(), 'utf8'));
     return { ...base, data: j.data || null, premium: j.premium || null,
@@ -115,22 +118,29 @@ class DataStore {
     this.lastError = null;
     this.seq = 0;
     this.ccVersion = null;          // version de Claude Code vue dans les transcripts (pour le User-Agent)
+    this.lastEntryTs = 0;           // horodatage du dernier message vu → détecte la conso en cours
     this.official = loadOfficialState();
   }
 
-  // Interroge l'endpoint officiel. Prudent avec le rate limit (429 agressif) :
-  // au plus une requête toutes les 3 min, backoff long en cas d'erreur,
-  // on garde la dernière réponse valide entre deux.
-  async refreshOfficial() {
+  // Interroge l'endpoint officiel. Cadence pilotée par l'activité réelle :
+  // ~45 s tant qu'on consomme (les chiffres bougent), 3 min au repos. Un raté
+  // réseau ne gèle plus l'affichage — on retente à 20 s, puis 40, 80… (max 5 min).
+  // Seul un 429 impose son délai (retry-after du serveur).
+  async refreshOfficial(force) {
     const o = this.official;
     const now = Date.now();
-    if (o.inFlight || now < o.nextTryAt) return;
+    if (o.inFlight) return;
+    if (!force) {
+      if (now < o.nextTryAt) return;
+      const consuming = this.lastEntryTs > o.fetchedAt;
+      if (now - o.fetchedAt < (consuming ? 45 * 1000 : 180 * 1000)) return;
+    }
     const token = readOAuthToken(process.env);
     if (!token) { o.lastErr = 'no token'; o.nextTryAt = now + 10 * 60 * 1000; saveOfficialState(o); return; }
     o.inFlight = true;
     try {
       const ctrl = new AbortController();
-      const timer = setTimeout(() => ctrl.abort(), 6000);
+      const timer = setTimeout(() => ctrl.abort(), 15000); // réseau d'entreprise : large
       const res = await fetch('https://api.anthropic.com/api/oauth/usage', {
         headers: {
           'Authorization': 'Bearer ' + token,
@@ -148,13 +158,15 @@ class DataStore {
         let ra = Number(raw) * 1000;
         if (!isFinite(ra) || ra <= 0) ra = (Date.parse(raw) || 0) - now;
         o.lastErr = 'rate-limited';
-        o.nextTryAt = now + Math.max(ra || 0, 15 * 60 * 1000) + Math.random() * 90 * 1000;
+        o.fails = 0;
+        o.nextTryAt = now + Math.max(ra || 0, 60 * 1000); // délai imposé par le serveur
         saveOfficialState(o);
         return;
       }
       if (!res.ok) {
         o.lastErr = 'http ' + res.status;
-        o.nextTryAt = now + (res.status === 401 ? 10 : 5) * 60 * 1000;
+        o.fails = (o.fails || 0) + 1;
+        o.nextTryAt = now + (res.status === 401 ? 10 * 60 * 1000 : Math.min(20000 * 2 ** (o.fails - 1), 300000));
         saveOfficialState(o);
         return;
       }
@@ -184,16 +196,19 @@ class DataStore {
       }
       o.raw = j; // pour --debug-usage (contient uniquement des stats, jamais le token)
       o.fetchedAt = now;
-      // 2 min ± jitter : assez réactif pour suivre la conso, assez espacé pour ne
-      // pas déclencher le 429 (jitter = postes derrière la même IP désynchronisés).
-      o.nextTryAt = now + 120 * 1000 + Math.random() * 40 * 1000;
+      o.nextTryAt = 0;   // la cadence est pilotée par l'activité, pas par un verrou
       o.lastErr = null;
+      o.fails = 0;
       saveOfficialState(o);
     } catch (e) {
+      // Diagnostic honnête : on garde le code réel plutôt que de deviner.
       const code = String((e && (e.code || (e.cause && e.cause.code))) || '');
-      if (/CERT|SSL|TLS|UNABLE_TO_VERIFY|SELF_SIGNED/i.test(code)) o.lastErr = 'tls (proxy? see README)';
-      else o.lastErr = e && e.name === 'AbortError' ? 'timeout' : 'offline';
-      o.nextTryAt = now + 5 * 60 * 1000; // réseau/proxy : on retentera, repli en attendant
+      if (e && e.name === 'AbortError') o.lastErr = 'timeout';
+      else if (/CERT|SELF_SIGNED|UNABLE_TO_VERIFY/i.test(code)) o.lastErr = 'tls (proxy? see README)';
+      else o.lastErr = 'net' + (code ? ' ' + code.toLowerCase() : '');
+      o.fails = (o.fails || 0) + 1;
+      // retente vite : un raté réseau ne doit pas figer les chiffres
+      o.nextTryAt = now + Math.min(20000 * 2 ** (o.fails - 1), 300000);
       saveOfficialState(o);
     } finally {
       o.inFlight = false;
@@ -258,6 +273,7 @@ class DataStore {
       e.cost = entryCost(e);
       const key = m.id ? m.id + ':' + (j.requestId || '') : 'k' + (this.seq++);
       this.entries.set(key, e);
+      if (ts > this.lastEntryTs) this.lastEntryTs = ts;
       added++;
     }
     return added;
