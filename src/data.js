@@ -164,13 +164,25 @@ function planUsageDirs(env) {
   return dirs;
 }
 
+// L'app réécrit ce fichier toutes les 5 min : pendant l'opération il disparaît
+// brièvement (ENOENT) ou se lit tronqué. Une lecture ratée ne doit JAMAIS faire
+// perdre la source — d'où la double tentative ici, et le cache côté DataStore.
+function readOnce(p) {
+  try {
+    return JSON.parse(fs.readFileSync(p, 'utf8'));
+  } catch (e) {
+    const t = Date.now(); while (Date.now() - t < 40) { /* fenêtre de réécriture */ }
+    return JSON.parse(fs.readFileSync(p, 'utf8'));
+  }
+}
+
 function readPlanUsage(env) {
   const dirs = planUsageDirs(env);
   let why = null;
   for (const d of dirs) {
     const p = path.join(d, 'plan-usage-history.json');
     try {
-      const j = JSON.parse(fs.readFileSync(p, 'utf8'));
+      const j = readOnce(p);
       const arr = Array.isArray(j.samples) ? j.samples : null;
       if (!arr || !arr.length) { why = why || 'empty'; continue; }
       const last = arr[arr.length - 1];
@@ -241,6 +253,7 @@ class DataStore {
     this.ccVersion = null;          // version de Claude Code vue dans les transcripts (pour le User-Agent)
     this.lastEntryTs = 0;           // horodatage du dernier message vu → détecte la conso en cours
     this.credsMtime = 0;            // suit le renouvellement du token par Claude Code
+    this.planCache = null;          // dernier relevé lu de l'app (survit aux réécritures)
     this.official = loadOfficialState();
   }
 
@@ -490,9 +503,13 @@ class DataStore {
     // heures. Par fenêtre, la donnée la plus fraîche gagne ; jamais de mélange.
     const od = this.official;
     const cacheU = readOfficialUsage(process.env);
+    // Cache : une lecture ratée (fichier en cours de réécriture) ne doit pas faire
+    // disparaître la source — on garde le dernier échantillon lu, il porte sa
+    // propre date et reste soumis à la règle de fraîcheur.
     const planRaw = readPlanUsage(process.env);
-    const plan = planRaw && planRaw.at ? planRaw : null;
-    const planErr = planRaw && planRaw.error ? planRaw.error : (plan ? null : 'not found');
+    if (planRaw && planRaw.at) this.planCache = planRaw;
+    const plan = (planRaw && planRaw.at) ? planRaw : (this.planCache || null);
+    const planErr = plan ? null : ((planRaw && planRaw.error) || 'not found');
     // Un relevé est valable si sa fenêtre court encore, ou s'il est très récent
     // (les échantillons de l'app n'embarquent pas l'heure de reset).
     // Règle dure : un relevé de plus de 15 min n'est PLUS considéré comme officiel.
