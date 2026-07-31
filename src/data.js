@@ -677,7 +677,7 @@ class DataStore {
     const byFamDay = {};
     const hourAgo = now - 3600 * 1000;
     const rollStart = now - D7; // fenêtre glissante 7 j — celle de la formule cccat
-    const roll = { prem: 0, tot: 0 };
+    const roll = { prem: 0, tot: 0, premCost: 0, totCost: 0 };
     for (const e of es) {
       if (e.ts >= dayStart) {
         acc(day, e);
@@ -689,8 +689,8 @@ class DataStore {
       }
       if (e.ts >= rollStart) {
         const tok = e.i + e.o + e.cw5 + e.cw1 + e.cr;
-        roll.tot += tok;
-        if (e.fam === premiumFam) roll.prem += tok;
+        roll.tot += tok; roll.totCost += e.cost;
+        if (e.fam === premiumFam) { roll.prem += tok; roll.premCost += e.cost; }
       }
       if (e.ts >= hourAgo) acc(hour, e);
     }
@@ -759,6 +759,21 @@ class DataStore {
     const estBlockCost = active ? active.sum.cost : 0;
     const estBlockTok = active ? active.sum.i + active.sum.o + active.sum.cw + active.sum.cr : 0;
     const ex5 = extrapolate(s5, 'fh'), ex7 = extrapolate(s7, 'sd');
+
+    // Coût premium sur la fenêtre de 7 j glissants finissant à `t`.
+    const premCostAt = (t) => {
+      let c = 0;
+      for (const e of es) if (e.fam === premiumFam && e.ts > t - D7 && e.ts <= t) c += e.cost;
+      return c;
+    };
+    // Quota premium déduit du dernier relevé officiel du bucket, puis appliqué à
+    // la conso premium d'aujourd'hui. Valable tant que la fenêtre hebdo n'a pas
+    // tourné (le relevé peut être ancien : c'est le quota qu'on en tire, pas la valeur).
+    let anchorPrem = null;
+    if (!offPrem && od.premium && od.premium.reset > now && od.premium.pct > 0 && od.fetchedAt > 0) {
+      const cAt = premCostAt(od.fetchedAt), cNow = premCostAt(now);
+      if (cAt > 0) anchorPrem = Math.min(100, od.premium.pct * 100 * (cNow / cAt));
+    }
     if (off5) {
       push('session', 'SESSION 5h', estBlockVal, estBlockCost, estBlockTok, null,
         reset5 ? (reset5 - now) / 1000 : null, null, { pct: ex5 != null ? ex5 : off.u5h * 100 });
@@ -781,11 +796,23 @@ class DataStore {
         official: !premEstimated, pct: offPrem.pct * 100,
         resetSec: (offPrem.reset - now) / 1000, resetText: null,
       });
+    } else if (anchorPrem != null) {
+      // Ancrage sur le dernier relevé officiel du bucket premium, même ancien :
+      // il donne le quota en coût (quota = coût_premium_à_T / pourcentage_à_T),
+      // puis on applique le coût premium consommé sur 7 j glissants aujourd'hui.
+      // Insensible au changement de modèle : si tu passes sur Opus, la conso
+      // premium stagne et la jauge ne bouge pas, contrairement à une règle de
+      // trois sur l'hebdo globale.
+      meters.push({
+        key: 'premium', label: premiumFam.toUpperCase() + ' 7d',
+        used: premium.val, tokens: premTok, limit: null, auto: true, official: false,
+        pct: anchorPrem, resetSec: reset7 ? (reset7 - now) / 1000 : null, resetText: null,
+      });
     } else if (off7 && roll.tot > 0) {
-      // Formule cccat : part de tokens premium sur 7 j glissants × hebdo OFFICIEL
-      // ÷ plafond premium (~50 %). Ancrée sur une valeur officielle, donc légitime.
+      // Sans relevé officiel premium : repli sur la formule cccat, en coût pondéré
+      // (un token Fable pèse ~2x un token Opus dans le quota).
       const share = cfg.premiumShare > 0 ? cfg.premiumShare : 0.5;
-      const pct = Math.min(100, ((roll.prem / roll.tot) * off.u7d / share) * 100);
+      const pct = Math.min(100, ((roll.premCost / roll.totCost) * off.u7d / share) * 100);
       meters.push({
         key: 'premium', label: premiumFam.toUpperCase() + ' 7d',
         used: premium.val, tokens: premTok, limit: null, auto: true, official: false,
