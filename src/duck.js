@@ -625,6 +625,7 @@ class Duck {
     this.joy = {
       lookUntil: t + rand(2, 3), endAt: t + rand(JOY_LEN[0], JOY_LEN[1]),
       nextTurn: 0, wx: this.x, said: false,
+      beatUntil: 0, kind: null, flap: 0.22, speed: 0,
     };
     this.act = null;
   }
@@ -647,10 +648,31 @@ class Duck {
       j.said = true;
       if (Math.random() < 0.6) this.say(pick(JOYS), 'calm', 1.8);
     }
-    // barbotage rapide (0,22 s contre 0,45 s au picorage) + gigotage sur place
-    this.frame = (Math.floor(t / 0.22) % 2 === 0) ? 'dabble' : 'stand';
-    if (t > j.nextTurn) { j.wx = this.x + rand(-5, 5); j.nextTurn = t + rand(0.8, 1.4); }
-    this.moveToward(j.wx, 7, dt, minX, maxX);
+    // Pas de tempo fixe : on tire un « temps » à la fois — une pointe de vitesse
+    // d'un côté ou de l'autre, un barbotage sur place, ou les deux à la fois.
+    // Distance, sens, vitesse et cadence du bec sont retirés à chaque temps :
+    // deux sessions de joie ne se ressemblent jamais.
+    if (t > j.beatUntil) {
+      j.kind = pickWeighted([['dash', 40], ['splash', 42], ['both', 18]]);
+      j.beatUntil = t + (j.kind === 'dash' ? rand(0.25, 0.55) : rand(0.5, 1.2));
+      j.flap = rand(0.15, 0.3);            // barbotage plus ou moins frénétique
+      if (j.kind === 'splash') { j.wx = this.x; j.speed = 0; }
+      else {
+        const dist = rand(4, 11) * (Math.random() < 0.5 ? -1 : 1);
+        j.wx = Math.max(minX, Math.min(maxX, this.x + dist));
+        j.speed = j.kind === 'dash' ? rand(20, 32) : rand(9, 14);
+      }
+    }
+    this.frame = j.kind === 'dash' ? 'stand'
+      : (Math.floor(t / j.flap) % 2 === 0) ? 'dabble' : 'stand';
+    if (j.speed) {
+      this.moveToward(j.wx, j.speed, dt, minX, maxX);
+      // sillage de la pointe de vitesse
+      if (j.kind === 'dash' && Math.random() < dt * 12) this.spawn({
+        x: this.dir < 0 ? this.x + SPR_W - 2 : this.x + 1, y: SPR_H - 1,
+        vx: -this.dir * rand(2, 5), vy: -rand(1, 3), ch: pick(['∘', '·']), fg: WATER, life: rand(0.3, 0.7), rel: false,
+      });
+    }
     if (Math.random() < dt * 1.6) this.hop = 2.2;
     if (Math.random() < dt * 14) this.spawn({
       x: this.x + rand(1, SPR_W - 1), y: SPR_H - rand(0, 2),
