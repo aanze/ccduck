@@ -94,6 +94,50 @@ const SPR = {
     '.OOYyyyy........',
     '.oYYy...........',
   ]),
+  // de face : il nous fixe
+  front: F([
+    '................',
+    '.....HHYY.......',
+    '....HYYYYY......',
+    '...HYYYYYYY.....',
+    '...YKYYYYKY.....',
+    '...YYYOOYYY.....',
+    '....YYooYY......',
+    '..YYYYYYYYYY....',
+    '.YYYYYYYYYYYY...',
+    '.yYYYYYYYYYYy...',
+    '..yyYYYYYYyy....',
+    '...yyyyyyyy.....',
+  ]),
+  frontBlink: F([
+    '................',
+    '.....HHYY.......',
+    '....HYYYYY......',
+    '...HYYYYYYY.....',
+    '...YyYYYYyY.....',
+    '...YYYOOYYY.....',
+    '....YYooYY......',
+    '..YYYYYYYYYY....',
+    '.YYYYYYYYYYYY...',
+    '.yYYYYYYYYYYy...',
+    '..yyYYYYYYyy....',
+    '...yyyyyyyy.....',
+  ]),
+  // de face, bec grand ouvert : QUACK
+  frontQuack: F([
+    '................',
+    '.....HHYY.......',
+    '....HYYYYY......',
+    '...HYYYYYYY.....',
+    '...YKYYYYKY.....',
+    '...YYYOOYYY.....',
+    '....YOOOOY......',
+    '....ooOOoo......',
+    '..YYYYYYYYYY....',
+    '.YYYYYYYYYYYY...',
+    '.yYYYYYYYYYYy...',
+    '..yyYYYYYYyy....',
+  ]),
   // lissage de plumes : tête retournée, bec dans l'aile
   preen: F([
     '................',
@@ -276,12 +320,19 @@ class Duck {
       // pause pendant l'alerte/panique : on fait le tour du bassin, pas de sieste
       weights = [['swim', 58], ['drift', 14], ['dabble', 14], ['quack', 14]];
     } else if (mode === 'zen') {
-      weights = [['drift', 30], ['sleep', 34], ['dabble', 10], ['preen', 10], ['swim', 10], ['quack', 6]];
+      weights = [['drift', 30], ['sleep', 30], ['dabble', 10], ['preen', 10], ['swim', 10], ['quack', 6]];
     } else {
-      weights = [['swim', 36], ['drift', 18], ['dabble', 14], ['preen', 10], ['quack', 12], ['sleep', 6]];
+      weights = [['swim', 34], ['drift', 16], ['dabble', 14], ['preen', 10], ['quack', 10], ['sleep', 6]];
+    }
+    // le regard caméra n'arrive qu'APRÈS une promenade : il s'arrête, se tourne,
+    // nous fixe, cligne des yeux, lâche un QUACK, puis retourne à ses affaires
+    if (!breakMode && (this.lastAct === 'swim' || this.lastAct === 'drift')) {
+      weights = weights.concat([['gaze', mode === 'zen' ? 12 : 18]]);
     }
     const name = pickWeighted(weights);
-    const a = { name, x: this.x, speed: 5 };
+    this.lastAct = name;
+    const a = { name, x: this.x, speed: 5, start: t };
+    if (name === 'gaze') { a.until = t + 4.4; return a; }
     if (name === 'swim') {
       // en pause de panique : grandes traversées (le "tour du bassin")
       a.x = breakMode ? (this.x > (minX + maxX) / 2 ? rand(minX, minX + 6) : rand(maxX - 6, maxX)) : rand(minX, maxX);
@@ -314,11 +365,28 @@ class Duck {
         vx: -this.dir * rand(1, 3), vy: -rand(0.5, 2), ch: '·', fg: WATER, life: rand(0.3, 0.7),
       });
     } else if (a.name === 'dabble') {
+      // barboter, c'est chercher sa nourriture : ça compte comme un repas
       this.frame = 'dabble';
+      if (!a.fed && t - a.start > 1.2) {
+        a.fed = true;
+        this.eaten = Math.min(6, this.eaten + 1);
+        if (this.nextPoopAt < t) this.nextPoopAt = t + rand(40, 90);
+      }
       if (Math.random() < dt * 5) this.spawn({
         x: this.headX() + rand(-2, 2), y: SPR_H - rand(0, 1),
         vx: rand(-2, 2), vy: -rand(1, 4), ch: pick(['∘', '°', '·']), fg: WATER, life: rand(0.4, 0.8),
       });
+    } else if (a.name === 'gaze') {
+      // il nous fixe : deux clignements puis un QUACK bec grand ouvert
+      const e = t - a.start;
+      if (e < 1.2) this.frame = 'front';
+      else if (e < 1.45) this.frame = 'frontBlink';
+      else if (e < 2.2) this.frame = 'front';
+      else if (e < 2.45) this.frame = 'frontBlink';
+      else if (e < 3.5) {
+        this.frame = 'frontQuack';
+        if (!a.said) { a.said = true; this.say('QUACK !', 'calm', 1.6); }
+      } else this.frame = 'front';
     } else if (a.name === 'preen') {
       this.frame = 'preen';
     } else if (a.name === 'sleep') {
