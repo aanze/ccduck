@@ -24,9 +24,11 @@ const SEED = 0xD9B44A;
 const PILL_A = 0xFF5A5A; // gélule bicolore
 const PILL_B = 0xF0F0F5;
 const SEDATE_SEC = 300;  // 5 min de dodo
-const POOP = 0x8A5A2B;
-const POOP_OLD = 0x5F3E1E;
-const POOP_LIFE = 60;    // la crotte dérive ~1 min puis disparaît
+const POOP = 0x7A4E22;      // base du monticule
+const POOP_TOP = 0x9A6B3C;  // sommet plus clair
+const POOP_OLD = 0x5F3E1E;  // semi-immergée avant de couler
+const POOP_LIFE = 60;       // dérive au plus ~1 min puis disparaît
+const CURRENT = 2.5;        // vitesse du courant (px/s, vers la gauche) — partagée avec l'eau
 
 function F(rows) {
   if (rows.length !== 12) throw new Error('sprite: 12 lignes attendues');
@@ -348,9 +350,9 @@ class Duck {
     };
     fall(this.seeds);
     fall(this.pills);
-    // les crottes partent avec le courant (l'eau file vers la gauche)
-    for (const p of this.poops) p.x -= 0.8 * dt;
-    this.poops = this.poops.filter((p) => this.t - p.born < POOP_LIFE && p.x > -2);
+    // les crottes partent avec le courant — exactement à sa vitesse
+    for (const p of this.poops) p.x -= CURRENT * dt;
+    this.poops = this.poops.filter((p) => this.t - p.born < POOP_LIFE && p.x > -3);
   }
 
   // Digestion : de temps en temps (et seulement s'il a mangé), un petit plop.
@@ -360,7 +362,9 @@ class Duck {
     this.eaten--;
     this.nextPoopAt = t + rand(60, 150);
     const tailX = this.dir < 0 ? this.x + SPR_W - 3 : this.x + 2; // derrière lui
-    this.poops.push({ x: tailX, born: t });
+    this.poops.push({ x: Math.max(0, Math.min(this.canvasW - 2, tailX)), born: t });
+    // la goutte qui tombe + l'éclaboussure
+    this.spawn({ x: tailX, y: SPR_H - 3, vx: 0, vy: 3, ch: '·', fg: POOP_TOP, life: 0.35, rel: false });
     this.spawn({ x: tailX, y: SPR_H - 1, vx: rand(-1, 1), vy: -rand(1, 2), ch: '∘', fg: WATER, life: 0.4, rel: false });
     if (Math.random() < 0.5) this.say('plop', 'calm', 1.1);
   }
@@ -539,4 +543,4 @@ class Duck {
   }
 }
 
-module.exports = { Duck, PAL, SPR_W, SPR_H, SEED, PILL_A, PILL_B, POOP, POOP_OLD, POOP_LIFE };
+module.exports = { Duck, PAL, SPR_W, SPR_H, SEED, PILL_A, PILL_B, POOP, POOP_TOP, POOP_OLD, POOP_LIFE, CURRENT };

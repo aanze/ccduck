@@ -49,7 +49,7 @@ Un paquet npm prêt à l'emploi est fourni dans [`dist/`](dist/) (et attaché au
 Releases GitHub). Télécharger le `.tgz` puis :
 
 ```bash
-npm install -g ./ccduck-1.5.0.tgz
+npm install -g ./ccduck-1.5.1.tgz
 ```
 
 (Copie figée : pour mettre à jour, réinstaller le `.tgz` de la version suivante.)
@@ -88,17 +88,17 @@ typiquement `%APPDATA%\npm` sous Windows) est dans le `PATH`, puis rouvrir le te
    pendant que tu consommes, précisément quand les chiffres comptent. Relu toutes les
    ~10 s : zéro réseau, zéro rate-limit, zéro décrochage. S'il vieillit (> 30 min), le
    pied de page l'indique (« open Claude Code »).
-2. **Endpoint officiel** (`•`, complément espacé) : `api.anthropic.com/api/oauth/usage`
-   avec le token OAuth déjà présent sur le poste — au plus **1 appel / 30 min** quand le
-   cache est sain (il ne sert alors qu'au compteur **Fable exact**, absent du cache),
-   plus souvent seulement si le cache manque. Backoff persistant sur 429 (`retry-after`
-   respecté), token jamais loggé ni envoyé ailleurs que chez Anthropic.
-   `ccduck --debug-usage` montre l'état et la réponse brute.
-3. **Estimation locale** (`≈`) : lecture des transcripts (`~/.claude/projects/**/*.jsonl`),
-   déduplication, agrégation par modèle. Pour la jauge Fable sans bucket officiel :
-   part de tokens fable × hebdo officiel ÷ part premium (~50 % de l'enveloppe). Repli
-   final pour tout le reste, et dans tous les cas la source des coûts, débits,
-   projections et du tableau — infos que `/usage` ne donne pas.
+2. **Jauge FABLE = formule cccat, toujours** (`≈`) : part de tokens fable dans les
+   transcripts × hebdo officiel ÷ part premium (~50 % de l'enveloppe, `premiumShare`).
+   Recalculée en continu sur des données fraîches — c'est la méthode qui colle aux
+   chiffres de l'écran `/usage`.
+3. **Endpoint officiel** (roue de secours) : `api.anthropic.com/api/oauth/usage` avec le
+   token OAuth déjà présent sur le poste — appelé seulement si le cache local manque ou
+   décroche (au plus 1 appel / 30 min sinon), backoff persistant sur 429, token jamais
+   loggé ni envoyé ailleurs que chez Anthropic. `ccduck --debug-usage` pour le diagnostic.
+4. **Estimation locale** (`≈`) : lecture des transcripts (`~/.claude/projects/**/*.jsonl`),
+   déduplication, agrégation par modèle — la source des coûts, débits, projections et du
+   tableau (infos que `/usage` ne donne pas), et dernier recours pour les jauges.
 
 Il n'y a **pas de jauge journalière** : cette limite n'existe pas chez Anthropic (les
 limites réelles sont le bloc de 5 h et les quotas hebdomadaires). Le total du jour reste

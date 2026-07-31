@@ -125,8 +125,8 @@ class DataStore {
     const o = this.official;
     const now = Date.now();
     if (o.inFlight || now < o.nextTryAt) return;
-    // Politique cccat : quand le cache local couvre session + hebdo et qu'il est
-    // frais, l'API ne sert qu'au bucket premium exact → au plus 1 appel / 30 min.
+    // Politique cccat : l'API n'est qu'une roue de secours pour session/hebdo
+    // quand le cache local décroche → au plus 1 appel / 30 min si le cache est sain.
     const c = readOfficialUsage(process.env);
     const cacheCovers = !!(c && c.u5h != null && c.reset5h > now && c.u7d != null
       && c.reset7d > now && now - c.at < 20 * 60 * 1000);
@@ -353,11 +353,10 @@ class DataStore {
     if (od.data && od.data.seven_day && od.data.seven_day.reset > now) cand7.push({ pct: od.data.seven_day.pct, reset: od.data.seven_day.reset, at: od.fetchedAt });
     const newest = (arr) => arr.sort((a, b) => b.at - a.at)[0] || null;
     const sess5 = newest(cand5), sess7 = newest(cand7);
-    const offPrem = od.premium && od.premium.reset > now && now - od.fetchedAt < 6 * 3600 * 1000 ? od.premium : null;
     const off = {
       u5h: sess5 ? sess5.pct : null, reset5h: sess5 ? sess5.reset : 0,
       u7d: sess7 ? sess7.pct : null, reset7d: sess7 ? sess7.reset : 0,
-      at: Math.max(sess5 ? sess5.at : 0, sess7 ? sess7.at : 0, offPrem ? od.fetchedAt : 0),
+      at: Math.max(sess5 ? sess5.at : 0, sess7 ? sess7.at : 0),
     };
     const off5 = !!sess5, off7 = !!sess7;
 
@@ -381,10 +380,9 @@ class DataStore {
       weekStart = now - 7 * 86400 * 1000;
     }
 
-    // Famille premium suivie par la 3e jauge (bucket officiel prioritaire)
+    // Famille premium suivie par la 3e jauge
     let premiumFam = cfg.premiumFamily;
-    if (offPrem) premiumFam = offPrem.name;
-    else if (premiumFam === 'auto') {
+    if (premiumFam === 'auto') {
       const recent = now - 14 * 86400 * 1000;
       premiumFam = es.some((e) => e.fam === 'fable' && e.ts > recent) ? 'fable'
         : es.some((e) => e.fam === 'opus' && e.ts > recent) ? 'opus' : 'fable';
@@ -480,12 +478,10 @@ class DataStore {
     }
     const premTok = premium.i + premium.o + premium.cw + premium.cr;
     const weekTokAll = week.i + week.o + week.cw + week.cr;
-    if (offPrem) {
-      push('premium', premiumFam.toUpperCase() + ' 7d', premium.val, premium.cost, premTok, null,
-        (offPrem.reset - now) / 1000, null, { pct: offPrem.pct * 100 });
-    } else if (off7 && weekTokAll > 0) {
-      // formule cccat : part de tokens premium × hebdo officiel ÷ plafond premium
-      // (Fable dispose d'~50 % de l'enveloppe hebdo sur les plans qui l'incluent)
+    if (off7 && weekTokAll > 0) {
+      // Formule cccat, TOUJOURS : part de tokens premium × hebdo officiel ÷ plafond
+      // premium (~50 % de l'enveloppe hebdo). Recalculée en continu sur les
+      // transcripts frais — plus fiable qu'un bucket API qui peut dater.
       const share = cfg.premiumShare > 0 ? cfg.premiumShare : 0.5;
       const pct = Math.min(150, ((premTok / weekTokAll) * off.u7d / share) * 100);
       meters.push({
@@ -494,6 +490,7 @@ class DataStore {
         pct, resetSec: weekReset ? (weekReset - now) / 1000 : null, resetText: null,
       });
     } else {
+      // sans hebdo officiel, dernier recours : calibrage sur pics historiques
       push('premium', premiumFam.toUpperCase() + ' 7d', premium.val, premium.cost, premTok,
         lim('premium', maxPremium, premium.cost),
         weekReset ? (weekReset - now) / 1000 : null, weekReset ? null : '7d rolling');
@@ -520,7 +517,7 @@ class DataStore {
       burnPerMin, burnTokPerMin, projPct,
       day, byFamDay,
       officialAt: off.at,
-      officialUsed: off5 || off7 || !!offPrem,
+      officialUsed: off5 || off7,
       officialErr: od.lastErr,
       officialRetryIn: Math.max(0, od.nextTryAt - now),
       entryCount: this.entries.size,

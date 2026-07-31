@@ -3,7 +3,7 @@
 // débit, tableau par modèle, pied de page. Conçu pour un panneau étroit (>= 56 col).
 
 const { A_BOLD, A_REV, A_DIM } = require('./ansi');
-const { SPR_W, SPR_H, PAL, SEED, PILL_A, PILL_B, POOP, POOP_OLD, POOP_LIFE } = require('./duck');
+const { SPR_W, SPR_H, PAL, SEED, PILL_A, PILL_B, POOP, POOP_TOP, POOP_OLD, POOP_LIFE, CURRENT } = require('./duck');
 const { fmtMetric, fmtTok, fmtDur, fmtClock, fmtPct, clip, padR, padL, fmtCost } = require('./format');
 
 const C = {
@@ -132,11 +132,18 @@ function drawCanvas(scr, top, rowsN, duckInfo, t) {
       if (sx + 1 >= 0 && sx + 1 < W) px[sy * W + sx + 1] = PILL_B;
     }
   }
-  // crottes en dérive (foncées quand elles vont couler)
+  // crottes en dérive : petit monticule 2 px de large, sommet plus clair ;
+  // semi-immergé (une seule rangée, foncée) juste avant de couler
   for (const p of duckInfo.poops || []) {
     const sx = Math.round(p.x), sy = baseY + SPR_H - 1;
     const old = (duckInfo.t - p.born) > POOP_LIFE - 12;
-    if (sx >= 0 && sx < W && sy >= 0 && sy < H) px[sy * W + sx] = old ? POOP_OLD : POOP;
+    const put = (X, Y, c) => { if (X >= 0 && X < W && Y >= 0 && Y < H) px[Y * W + X] = c; };
+    if (old) {
+      put(sx, sy, POOP_OLD); put(sx + 1, sy, POOP_OLD);
+    } else {
+      put(sx, sy, POOP); put(sx + 1, sy, POOP);
+      put(sx, sy - 1, POOP_TOP);
+    }
   }
   for (let r = 0; r < SPR_H; r++) {
     const line = rows[r];
@@ -172,7 +179,7 @@ function drawCanvas(scr, top, rowsN, duckInfo, t) {
 
 function drawWater(scr, y, t, duckX) {
   for (let x = 0; x < scr.cols; x++) {
-    const phase = (x + Math.floor(t * 4)) % 8;
+    const phase = (x + Math.floor(t * CURRENT)) % 8;
     const near = Math.abs(x - (duckX + SPR_W / 2)) < 4;
     scr.set(x, y, near ? '≈' : '~', phase < 4 ? C.water1 : C.water2, null, near ? 0 : A_DIM);
   }
@@ -331,7 +338,7 @@ function drawMini(scr, state) {
   }
   // canard une ligne sur l'eau
   if (y < rows) {
-    for (let x = 0; x < cols; x++) scr.set(x, y, '~', (x + Math.floor(tSec * 4)) % 8 < 4 ? C.water1 : C.water2, null, A_DIM);
+    for (let x = 0; x < cols; x++) scr.set(x, y, '~', (x + Math.floor(tSec * CURRENT)) % 8 < 4 ? C.water1 : C.water2, null, A_DIM);
     for (const s of state.duckInfo.seeds || []) {
       if (s.landed) scr.set(Math.round(s.x), y, '∙', SEED);
     }
