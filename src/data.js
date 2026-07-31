@@ -30,6 +30,28 @@ function readOAuthToken(env) {
   return null;
 }
 
+// État persisté des compteurs officiels : survit aux relances de ccduck, pour
+// réafficher la dernière valeur connue ET respecter le backoff (l'endpoint 429
+// sévèrement — chaque relance ne doit PAS refaire un appel à froid).
+function officialStatePath() { return path.join(os.homedir(), '.ccduck-usage.json'); }
+
+function loadOfficialState() {
+  const base = { data: null, premium: null, fetchedAt: 0, nextTryAt: 0, lastErr: null, inFlight: false };
+  try {
+    const j = JSON.parse(fs.readFileSync(officialStatePath(), 'utf8'));
+    return { ...base, data: j.data || null, premium: j.premium || null,
+      fetchedAt: j.fetchedAt || 0, nextTryAt: j.nextTryAt || 0, lastErr: j.lastErr || null };
+  } catch (e) { return base; }
+}
+
+function saveOfficialState(o) {
+  try {
+    fs.writeFileSync(officialStatePath(), JSON.stringify({
+      data: o.data, premium: o.premium, fetchedAt: o.fetchedAt, nextTryAt: o.nextTryAt, lastErr: o.lastErr,
+    }));
+  } catch (e) { /* disque plein/verrouillé : tant pis, on garde l'état mémoire */ }
+}
+
 // Repli : cache local écrit par l'extension VS Code / la statusline (parfois périmé).
 function readOfficialUsage(env) {
   const paths = [];
@@ -81,7 +103,7 @@ class DataStore {
     this.lastError = null;
     this.seq = 0;
     this.ccVersion = null;          // version de Claude Code vue dans les transcripts (pour le User-Agent)
-    this.official = { data: null, premium: null, fetchedAt: 0, nextTryAt: 0, inFlight: false };
+    this.official = loadOfficialState();
   }
 
   // Interroge l'endpoint officiel. Prudent avec le rate limit (429 agressif) :
@@ -92,7 +114,7 @@ class DataStore {
     const now = Date.now();
     if (o.inFlight || now < o.nextTryAt) return;
     const token = readOAuthToken(process.env);
-    if (!token) { o.nextTryAt = now + 10 * 60 * 1000; return; }
+    if (!token) { o.lastErr = 'no token'; o.nextTryAt = now + 10 * 60 * 1000; saveOfficialState(o); return; }
     o.inFlight = true;
     try {
       const ctrl = new AbortController();
@@ -109,10 +131,17 @@ class DataStore {
       clearTimeout(timer);
       if (res.status === 429) {
         const ra = Number(res.headers.get('retry-after')) || 0;
+        o.lastErr = 'rate-limited';
         o.nextTryAt = now + Math.max(ra * 1000, 15 * 60 * 1000);
+        saveOfficialState(o);
         return;
       }
-      if (!res.ok) { o.nextTryAt = now + (res.status === 401 ? 10 : 5) * 60 * 1000; return; }
+      if (!res.ok) {
+        o.lastErr = 'http ' + res.status;
+        o.nextTryAt = now + (res.status === 401 ? 10 : 5) * 60 * 1000;
+        saveOfficialState(o);
+        return;
+      }
       const j = await res.json();
       const win = (v) => (v && typeof v.utilization === 'number')
         ? { pct: v.utilization / 100, reset: Date.parse(v.resets_at) || 0 } : null;
@@ -140,8 +169,12 @@ class DataStore {
       o.raw = j; // pour --debug-usage (contient uniquement des stats, jamais le token)
       o.fetchedAt = now;
       o.nextTryAt = now + 180 * 1000;
+      o.lastErr = null;
+      saveOfficialState(o);
     } catch (e) {
+      o.lastErr = e && e.name === 'AbortError' ? 'timeout' : 'offline';
       o.nextTryAt = now + 5 * 60 * 1000; // réseau/proxy : on retentera, repli en attendant
+      saveOfficialState(o);
     } finally {
       o.inFlight = false;
     }
@@ -281,15 +314,23 @@ class DataStore {
     // Compteurs officiels : API /usage live en priorité, sinon cache VS Code local.
     // Pour le cache (souvent périmé), la donnée 5h n'est fiable que si elle a été
     // écrite APRÈS le début du bloc en cours ; l'API live est la vérité telle quelle.
-    const live = (this.official.data && now - this.official.fetchedAt < 30 * 60 * 1000) ? this.official : null;
+    // Validité PAR FENÊTRE : un % de session officiel reste vrai tant que son bloc
+    // n'a pas tourné (il ne peut que monter) ; hebdo/premium tolérés jusqu'à 6 h
+    // d'âge. L'état survit aux relances via ~/.ccduck-usage.json — une relance
+    // réaffiche la dernière valeur officielle sans re-taper l'endpoint (429 !).
+    const od = this.official;
+    const ageOk = now - od.fetchedAt < 6 * 3600 * 1000;
+    const apiSess = od.data && od.data.five_hour && od.data.five_hour.reset > now
+      && od.fetchedAt >= od.data.five_hour.reset - H5 ? od.data.five_hour : null;
+    const apiWeek = ageOk && od.data && od.data.seven_day && od.data.seven_day.reset > now ? od.data.seven_day : null;
+    const apiPrem = ageOk && od.premium && od.premium.reset > now ? od.premium : null;
     let off = null, offSource = null;
-    if (live) {
+    const offPrem = apiPrem;
+    if (apiSess || apiWeek || apiPrem) {
       off = {
-        u5h: live.data.five_hour ? live.data.five_hour.pct : null,
-        reset5h: live.data.five_hour ? live.data.five_hour.reset : 0,
-        u7d: live.data.seven_day ? live.data.seven_day.pct : null,
-        reset7d: live.data.seven_day ? live.data.seven_day.reset : 0,
-        at: live.fetchedAt,
+        u5h: apiSess ? apiSess.pct : null, reset5h: apiSess ? apiSess.reset : 0,
+        u7d: apiWeek ? apiWeek.pct : null, reset7d: apiWeek ? apiWeek.reset : 0,
+        at: od.fetchedAt,
       };
       offSource = 'api';
     } else {
@@ -298,8 +339,6 @@ class DataStore {
     }
     const off5 = !!(off && off.u5h != null && (offSource === 'api' || (off.reset5h > now && off.at >= off.reset5h - H5)));
     const off7 = !!(off && off.u7d != null && (offSource === 'api' || (off.reset7d > now && off.at >= off.reset7d - D7)));
-    // Jauge premium officielle (limite hebdo par modèle : Fable/Opus/…)
-    const offPrem = live && live.premium ? live.premium : null;
 
     // Fenêtres jour / semaine
     const midnight = new Date(now); midnight.setHours(0, 0, 0, 0);
@@ -448,6 +487,8 @@ class DataStore {
       officialAt: off ? off.at : 0,
       officialUsed: off5 || off7 || !!offPrem,
       officialSource: offSource,
+      officialErr: od.lastErr,
+      officialRetryIn: Math.max(0, od.nextTryAt - now),
       entryCount: this.entries.size,
       lastScanAt: this.lastScanAt,
       lastError: this.lastError,

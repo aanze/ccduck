@@ -80,11 +80,19 @@ async function run(argv) {
 
   const store = new DataStore(cfg);
 
-  // ---- diagnostic : réponse brute de l'endpoint officiel ----
+  // ---- diagnostic : état persisté + appel forcé à l'endpoint officiel ----
   if (opts.debugUsage) {
-    await store.refreshOfficial();
     const o = store.official;
-    console.log(o.raw ? JSON.stringify(o.raw, null, 2) : 'no response (token missing, offline, or rate-limited)');
+    console.log('persisted state (~/.ccduck-usage.json):');
+    console.log(JSON.stringify({
+      fetchedAt: o.fetchedAt ? new Date(o.fetchedAt).toISOString() : null,
+      nextTryAt: o.nextTryAt ? new Date(o.nextTryAt).toISOString() : null,
+      lastErr: o.lastErr, data: o.data, premium: o.premium,
+    }, null, 2));
+    console.log('\nforcing live call…');
+    o.nextTryAt = 0;
+    await store.refreshOfficial();
+    console.log(o.raw ? JSON.stringify(o.raw, null, 2) : 'live call failed: ' + (o.lastErr || 'unknown'));
     return;
   }
 

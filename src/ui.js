@@ -293,6 +293,9 @@ function draw(scr, state) {
     }
     if (snap.meters.some((m) => m.auto)) bits.push('≈ auto (' + cfg.historyDays + 'd)');
     else if (!snap.officialUsed) bits.push('limits: config');
+    if (snap.officialErr && snap.meters.some((m) => !m.official)) {
+      bits.push('usage: ' + snap.officialErr + (snap.officialRetryIn > 0 ? ' (retry ' + fmtDur(snap.officialRetryIn / 1000) + ')' : ''));
+    }
     const lim = bits.join(' · ');
     scr.text(1, fy, clip(keys + '  ·  ' + lim, cols - 2), C.faint);
   }
