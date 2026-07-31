@@ -21,7 +21,7 @@ Usage: ccduck [options]
   --config PATH    config file (default: ~/.ccduck.json)
   --help, --version
 
-Keys  : [q] quit  [f] feed the duck  [r] refresh  [m] metric  [c] table  [d] demo  [p] pause
+Keys  : [q] quit  [f] feed the duck  [s] sleeping pill (5 min)  [r] refresh  [m] metric  [c] table  [d] demo  [p] pause
 Config: ~/.ccduck.json (limits, thresholds, weekly reset… see README)`;
 
 function parseArgs(argv) {
@@ -188,6 +188,7 @@ async function run(argv) {
       else if (k === 'r' || k === 'R') { if (!pendingScan) pendingScan = store.scanSteps(); pokeOfficial(); }
       else if (k === 'm' || k === 'M') { metric = METRICS[(METRICS.indexOf(metric) + 1) % METRICS.length]; refreshSnap(); }
       else if (k === 'f' || k === 'F') { duck.feed(); }
+      else if (k === 's' || k === 'S') { duck.dropPill(); }
       else if (k === 'c' || k === 'C') { showTable = !showTable; }
       else if (k === 'p' || k === 'P' || k === ' ') { paused = !paused; }
       else if (k === 'd' || k === 'D') {

@@ -19,7 +19,10 @@ jaune en pixel art qui vit sa vie sur l'eau… et panique quand tes limites appr
   les autres modèles restent utilisables. Touche `f` pour
   lui **jeter des graines** : elle accourt (même en pleine panique), picore un moment
   (« nom nom nom »), puis retourne à ses occupations — les graines restantes flottent
-  pour plus tard.
+  pour plus tard. Touche `s` pour lâcher une **gélule sédative** bicolore : elle la prend
+  pour de la nourriture, la gobe… et s'endort **5 minutes**, paisible, même en pleine
+  panique. Et après un bon repas, un petit « plop » de temps en temps — la crotte dérive
+  au fil de l'eau une minute avant de disparaître.
 - Optimisé pour le panneau terminal étroit de la fenêtre Claude Code (56 colonnes et plus,
   mode mini en dessous), zéro dépendance, Node ≥ 18. UI en anglais.
 
@@ -46,7 +49,7 @@ Un paquet npm prêt à l'emploi est fourni dans [`dist/`](dist/) (et attaché au
 Releases GitHub). Télécharger le `.tgz` puis :
 
 ```bash
-npm install -g ./ccduck-1.4.3.tgz
+npm install -g ./ccduck-1.5.0.tgz
 ```
 
 (Copie figée : pour mettre à jour, réinstaller le `.tgz` de la version suivante.)
@@ -77,21 +80,25 @@ typiquement `%APPDATA%\npm` sous Windows) est dans le `PATH`, puis rouvrir le te
 
 ## D'où viennent les chiffres ?
 
-**Aucune connexion à faire, aucune clé à fournir** — trois sources, par ordre de priorité :
+**Aucune connexion à faire, aucune clé à fournir** — architecture « cache d'abord »
+(même approche que [cccat](https://github.com/Glance-mediametrie/cccat)) :
 
-1. **Pourcentages officiels** (`•`) : ccduck interroge le même endpoint que l'écran
-   `/usage` de Claude Code (`api.anthropic.com/api/oauth/usage`), authentifié avec le
-   token OAuth **déjà présent** sur le poste (`~/.claude/.credentials.json`) — le
-   mécanisme standard des statuslines communautaires. Les trois jauges (session 5 h,
-   hebdo tous modèles, hebdo Fable/Opus) affichent alors **exactement** les chiffres
-   officiels, resets compris. Requête au plus toutes les 3 min (l'endpoint rate-limite
-   sévèrement), token jamais loggé et jamais envoyé ailleurs que chez Anthropic.
-   `ccduck --debug-usage` montre la réponse brute.
-2. **Cache local de Claude Code** (`• cache`) : `~/.claude/vscode-claude-status-cache.json`,
-   utilisé si l'API ne répond pas (hors ligne, 429). L'âge est affiché s'il date.
+1. **Cache officiel local** (`•`, primaire) : `~/.claude/vscode-claude-status-cache.json`,
+   que Claude Code rafraîchit **à chaque échange avec l'API** — donc toujours frais
+   pendant que tu consommes, précisément quand les chiffres comptent. Relu toutes les
+   ~10 s : zéro réseau, zéro rate-limit, zéro décrochage. S'il vieillit (> 30 min), le
+   pied de page l'indique (« open Claude Code »).
+2. **Endpoint officiel** (`•`, complément espacé) : `api.anthropic.com/api/oauth/usage`
+   avec le token OAuth déjà présent sur le poste — au plus **1 appel / 30 min** quand le
+   cache est sain (il ne sert alors qu'au compteur **Fable exact**, absent du cache),
+   plus souvent seulement si le cache manque. Backoff persistant sur 429 (`retry-after`
+   respecté), token jamais loggé ni envoyé ailleurs que chez Anthropic.
+   `ccduck --debug-usage` montre l'état et la réponse brute.
 3. **Estimation locale** (`≈`) : lecture des transcripts (`~/.claude/projects/**/*.jsonl`),
-   déduplication, agrégation par modèle. Repli final, et dans tous les cas la source
-   des coûts, débits, projections et du tableau — infos que `/usage` ne donne pas.
+   déduplication, agrégation par modèle. Pour la jauge Fable sans bucket officiel :
+   part de tokens fable × hebdo officiel ÷ part premium (~50 % de l'enveloppe). Repli
+   final pour tout le reste, et dans tous les cas la source des coûts, débits,
+   projections et du tableau — infos que `/usage` ne donne pas.
 
 Il n'y a **pas de jauge journalière** : cette limite n'existe pas chez Anthropic (les
 limites réelles sont le bloc de 5 h et les quotas hebdomadaires). Le total du jour reste
@@ -109,6 +116,7 @@ config. La métrique par défaut est le **coût équivalent API** (cache lu 0,1�
 |---|---|
 | `q` | quitter |
 | `f` | jeter une poignée de graines au canard |
+| `s` | lâcher une gélule sédative (dodo 5 min, même en panique) |
 | `r` | rafraîchir maintenant (sinon toutes les 10 s) |
 | `m` | métrique : cost → tokens → no-cache |
 | `c` | afficher/masquer le tableau par modèle |
@@ -152,6 +160,7 @@ Fichier optionnel, à créer dans le dossier utilisateur. Tout est optionnel :
 | `alert` / `panic` | seuils (%) qui déclenchent l'alerte et la panique du canard |
 | `planLabel` | libellé affiché dans l'en-tête (ex. `"Max 20x"`) |
 | `premiumFamily` | `auto` (fable si utilisé, sinon opus), `fable` ou `opus` |
+| `premiumShare` | part de l'enveloppe hebdo allouée au modèle premium pour la formule d'estimation (défaut `0.5`) |
 | `weeklyReset` | jour/heure du reset hebdo (`weekday` : 0 = dimanche … 6 = samedi) — utile seulement si le cache officiel de Claude Code est absent ; sinon le reset officiel est utilisé automatiquement |
 | `limits.*` | en **dollars équivalent API**, ou `"auto"` (pic historique) — ne sert qu'aux jauges estimées `≈` |
 

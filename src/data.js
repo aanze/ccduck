@@ -125,6 +125,12 @@ class DataStore {
     const o = this.official;
     const now = Date.now();
     if (o.inFlight || now < o.nextTryAt) return;
+    // Politique cccat : quand le cache local couvre session + hebdo et qu'il est
+    // frais, l'API ne sert qu'au bucket premium exact → au plus 1 appel / 30 min.
+    const c = readOfficialUsage(process.env);
+    const cacheCovers = !!(c && c.u5h != null && c.reset5h > now && c.u7d != null
+      && c.reset7d > now && now - c.at < 20 * 60 * 1000);
+    if (cacheCovers && now - o.fetchedAt < 30 * 60 * 1000) return;
     const token = readOAuthToken(process.env);
     if (!token) { o.lastErr = 'no token'; o.nextTryAt = now + 10 * 60 * 1000; saveOfficialState(o); return; }
     o.inFlight = true;
@@ -332,34 +338,28 @@ class DataStore {
     }
     const active = blocks.length && now < blocks[blocks.length - 1].end ? blocks[blocks.length - 1] : null;
 
-    // Compteurs officiels : API /usage live en priorité, sinon cache VS Code local.
-    // Pour le cache (souvent périmé), la donnée 5h n'est fiable que si elle a été
-    // écrite APRÈS le début du bloc en cours ; l'API live est la vérité telle quelle.
-    // Validité PAR FENÊTRE : un % de session officiel reste vrai tant que son bloc
-    // n'a pas tourné (il ne peut que monter) ; hebdo/premium tolérés jusqu'à 6 h
-    // d'âge. L'état survit aux relances via ~/.ccduck-usage.json — une relance
-    // réaffiche la dernière valeur officielle sans re-taper l'endpoint (429 !).
+    // Compteurs officiels — approche cccat : la source PRIMAIRE est le cache local
+    // que Claude Code rafraîchit à chaque échange avec l'API (donc frais pendant
+    // qu'on consomme, exactement quand ça compte) ; relu à chaque snapshot, zéro
+    // réseau, zéro rate-limit. L'API OAuth n'est qu'un complément espacé (bucket
+    // Fable exact). Par fenêtre, on garde la source la plus récemment mise à jour
+    // dont la fenêtre court toujours (reset dans le futur).
     const od = this.official;
-    const ageOk = now - od.fetchedAt < 6 * 3600 * 1000;
-    const apiSess = od.data && od.data.five_hour && od.data.five_hour.reset > now
-      && od.fetchedAt >= od.data.five_hour.reset - H5 ? od.data.five_hour : null;
-    const apiWeek = ageOk && od.data && od.data.seven_day && od.data.seven_day.reset > now ? od.data.seven_day : null;
-    const apiPrem = ageOk && od.premium && od.premium.reset > now ? od.premium : null;
-    let off = null, offSource = null;
-    const offPrem = apiPrem;
-    if (apiSess || apiWeek || apiPrem) {
-      off = {
-        u5h: apiSess ? apiSess.pct : null, reset5h: apiSess ? apiSess.reset : 0,
-        u7d: apiWeek ? apiWeek.pct : null, reset7d: apiWeek ? apiWeek.reset : 0,
-        at: od.fetchedAt,
-      };
-      offSource = 'api';
-    } else {
-      const c = readOfficialUsage(process.env);
-      if (c) { off = c; offSource = 'cache'; }
-    }
-    const off5 = !!(off && off.u5h != null && (offSource === 'api' || (off.reset5h > now && off.at >= off.reset5h - H5)));
-    const off7 = !!(off && off.u7d != null && (offSource === 'api' || (off.reset7d > now && off.at >= off.reset7d - D7)));
+    const cacheU = readOfficialUsage(process.env);
+    const cand5 = [], cand7 = [];
+    if (cacheU && cacheU.u5h != null && cacheU.reset5h > now) cand5.push({ pct: cacheU.u5h, reset: cacheU.reset5h, at: cacheU.at });
+    if (cacheU && cacheU.u7d != null && cacheU.reset7d > now) cand7.push({ pct: cacheU.u7d, reset: cacheU.reset7d, at: cacheU.at });
+    if (od.data && od.data.five_hour && od.data.five_hour.reset > now) cand5.push({ pct: od.data.five_hour.pct, reset: od.data.five_hour.reset, at: od.fetchedAt });
+    if (od.data && od.data.seven_day && od.data.seven_day.reset > now) cand7.push({ pct: od.data.seven_day.pct, reset: od.data.seven_day.reset, at: od.fetchedAt });
+    const newest = (arr) => arr.sort((a, b) => b.at - a.at)[0] || null;
+    const sess5 = newest(cand5), sess7 = newest(cand7);
+    const offPrem = od.premium && od.premium.reset > now && now - od.fetchedAt < 6 * 3600 * 1000 ? od.premium : null;
+    const off = {
+      u5h: sess5 ? sess5.pct : null, reset5h: sess5 ? sess5.reset : 0,
+      u7d: sess7 ? sess7.pct : null, reset7d: sess7 ? sess7.reset : 0,
+      at: Math.max(sess5 ? sess5.at : 0, sess7 ? sess7.at : 0, offPrem ? od.fetchedAt : 0),
+    };
+    const off5 = !!sess5, off7 = !!sess7;
 
     // Fenêtres jour / semaine
     const midnight = new Date(now); midnight.setHours(0, 0, 0, 0);
@@ -479,9 +479,20 @@ class DataStore {
         weekReset ? (weekReset - now) / 1000 : null, weekReset ? null : '7d rolling');
     }
     const premTok = premium.i + premium.o + premium.cw + premium.cr;
+    const weekTokAll = week.i + week.o + week.cw + week.cr;
     if (offPrem) {
       push('premium', premiumFam.toUpperCase() + ' 7d', premium.val, premium.cost, premTok, null,
         (offPrem.reset - now) / 1000, null, { pct: offPrem.pct * 100 });
+    } else if (off7 && weekTokAll > 0) {
+      // formule cccat : part de tokens premium × hebdo officiel ÷ plafond premium
+      // (Fable dispose d'~50 % de l'enveloppe hebdo sur les plans qui l'incluent)
+      const share = cfg.premiumShare > 0 ? cfg.premiumShare : 0.5;
+      const pct = Math.min(150, ((premTok / weekTokAll) * off.u7d / share) * 100);
+      meters.push({
+        key: 'premium', label: premiumFam.toUpperCase() + ' 7d',
+        used: premium.val, tokens: premTok, limit: null, auto: true, official: false,
+        pct, resetSec: weekReset ? (weekReset - now) / 1000 : null, resetText: null,
+      });
     } else {
       push('premium', premiumFam.toUpperCase() + ' 7d', premium.val, premium.cost, premTok,
         lim('premium', maxPremium, premium.cost),
@@ -508,9 +519,8 @@ class DataStore {
       meters, metric, premiumFam,
       burnPerMin, burnTokPerMin, projPct,
       day, byFamDay,
-      officialAt: off ? off.at : 0,
+      officialAt: off.at,
       officialUsed: off5 || off7 || !!offPrem,
-      officialSource: offSource,
       officialErr: od.lastErr,
       officialRetryIn: Math.max(0, od.nextTryAt - now),
       entryCount: this.entries.size,

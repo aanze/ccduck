@@ -21,6 +21,12 @@ const PAL = {
 };
 
 const SEED = 0xD9B44A;
+const PILL_A = 0xFF5A5A; // gélule bicolore
+const PILL_B = 0xF0F0F5;
+const SEDATE_SEC = 300;  // 5 min de dodo
+const POOP = 0x8A5A2B;
+const POOP_OLD = 0x5F3E1E;
+const POOP_LIFE = 60;    // la crotte dérive ~1 min puis disparaît
 
 function F(rows) {
   if (rows.length !== 12) throw new Error('sprite: 12 lignes attendues');
@@ -206,6 +212,11 @@ class Duck {
     this.nextBubbleAt = 0;
     this.particles = [];        // {x, y, vx, vy, ch, fg, life, grav, rel}
     this.seeds = [];            // {x, y, vy, landed} — y relatif au haut du sprite
+    this.pills = [];            // gélules sédatives (mêmes physiques que les graines)
+    this.sedatedUntil = 0;
+    this.poops = [];            // {x, born} — dérivent avec le courant
+    this.eaten = 0;             // digestion : pas de repas, pas de plop
+    this.nextPoopAt = 0;
     this.feeding = null;        // {until}
     this.feedCooldownUntil = 0;
     this.eatT = 0;
@@ -232,6 +243,17 @@ class Duck {
     }
     while (this.seeds.length > 28) this.seeds.shift();
     this.feedCooldownUntil = 0; // de la bouffe fraîche, irrésistible
+  }
+
+  // Lâche une gélule sédative : il la prend pour de la nourriture, la gobe… zzz.
+  dropPill(atX) {
+    const W = this.canvasW;
+    this.pills.push({
+      x: Math.max(1, Math.min(W - 3, (atX != null ? atX : rand(W * 0.15, W * 0.85)))),
+      y: -rand(4, 9), vy: rand(3, 6), landed: false,
+    });
+    while (this.pills.length > 6) this.pills.shift();
+    this.feedCooldownUntil = 0;
   }
 
   headX() { return this.dir < 0 ? this.x + 2 : this.x + SPR_W - 3; }
@@ -312,23 +334,46 @@ class Duck {
   }
 
   updateSeeds(dt) {
-    for (const s of this.seeds) {
-      if (s.landed) continue;
-      s.y += s.vy * dt;
-      s.vy += 14 * dt;
-      if (s.y >= SPR_H - 1) {
-        s.y = SPR_H - 1;
-        s.landed = true;
-        this.spawn({ x: s.x, y: SPR_H - 1, vx: rand(-1.5, 1.5), vy: -rand(1, 3), ch: '∘', fg: WATER, life: 0.4, rel: false });
+    const fall = (arr) => {
+      for (const s of arr) {
+        if (s.landed) continue;
+        s.y += s.vy * dt;
+        s.vy += 14 * dt;
+        if (s.y >= SPR_H - 1) {
+          s.y = SPR_H - 1;
+          s.landed = true;
+          this.spawn({ x: s.x, y: SPR_H - 1, vx: rand(-1.5, 1.5), vy: -rand(1, 3), ch: '∘', fg: WATER, life: 0.4, rel: false });
+        }
       }
-    }
+    };
+    fall(this.seeds);
+    fall(this.pills);
+    // les crottes partent avec le courant (l'eau file vers la gauche)
+    for (const p of this.poops) p.x -= 0.8 * dt;
+    this.poops = this.poops.filter((p) => this.t - p.born < POOP_LIFE && p.x > -2);
+  }
+
+  // Digestion : de temps en temps (et seulement s'il a mangé), un petit plop.
+  maybePoop() {
+    const t = this.t;
+    if (this.eaten <= 0 || t < this.nextPoopAt) return;
+    this.eaten--;
+    this.nextPoopAt = t + rand(60, 150);
+    const tailX = this.dir < 0 ? this.x + SPR_W - 3 : this.x + 2; // derrière lui
+    this.poops.push({ x: tailX, born: t });
+    this.spawn({ x: tailX, y: SPR_H - 1, vx: rand(-1, 1), vy: -rand(1, 2), ch: '∘', fg: WATER, life: 0.4, rel: false });
+    if (Math.random() < 0.5) this.say('plop', 'calm', 1.1);
   }
 
   // Retourne true si le canard est occupé à manger (prioritaire sur tout).
+  // Les gélules sont dans la liste comme la bouffe : il n'y voit que du feu.
   tryFeeding(dt, minX, maxX) {
     const t = this.t;
-    const landed = this.seeds.filter((s) => s.landed);
-    if (!landed.length || t < this.feedCooldownUntil) { this.feeding = null; return false; }
+    const edibles = [
+      ...this.seeds.filter((s) => s.landed).map((s) => ({ it: s, list: this.seeds, pill: false })),
+      ...this.pills.filter((p) => p.landed).map((p) => ({ it: p, list: this.pills, pill: true })),
+    ];
+    if (!edibles.length || t < this.feedCooldownUntil) { this.feeding = null; return false; }
     if (!this.feeding) {
       this.feeding = { until: t + rand(10, 16) };
       if (Math.random() < 0.5) this.say('quack !', 'calm', 1.2);
@@ -340,28 +385,38 @@ class Duck {
       this.feedCooldownUntil = t + rand(9, 16);
       return false;
     }
-    // graine la plus proche du bec
-    let best = landed[0], bd = Infinity;
-    for (const s of landed) { const d = Math.abs(s.x - this.headX()); if (d < bd) { bd = d; best = s; } }
+    // le morceau le plus proche du bec
+    let best = edibles[0], bd = Infinity;
+    for (const e of edibles) { const d = Math.abs(e.it.x - this.headX()); if (d < bd) { bd = d; best = e; } }
     if (bd > 2.5) {
-      this.moveToward(best.x - SPR_W / 2, 13, dt, minX, maxX);
+      this.moveToward(best.it.x - SPR_W / 2, 13, dt, minX, maxX);
       this.frame = 'stand';
       if (Math.random() < dt * 6) this.spawn({
         x: this.dir < 0 ? this.x + SPR_W - 2 : this.x + 1, y: SPR_H - 1,
         vx: -this.dir * rand(1.5, 3.5), vy: -rand(0.5, 2), ch: '·', fg: WATER, life: rand(0.3, 0.6),
       });
     } else {
-      // picore : tête plonge, la graine disparaît en miettes
+      // picore : tête plonge, le morceau disparaît en miettes
       this.frame = Math.floor(t / 0.45) % 2 === 0 ? 'dabble' : 'stand';
       this.eatT += dt;
       if (this.eatT > 1.0) {
         this.eatT = 0;
-        this.seeds.splice(this.seeds.indexOf(best), 1);
+        best.list.splice(best.list.indexOf(best.it), 1);
         for (let i = 0; i < 3; i++) this.spawn({
-          x: best.x + rand(-1, 1), y: SPR_H - 1 - rand(0, 1),
-          vx: rand(-2, 2), vy: -rand(1, 3), ch: pick(['·', '˙']), fg: SEED, life: rand(0.3, 0.6), rel: false,
+          x: best.it.x + rand(-1, 1), y: SPR_H - 1 - rand(0, 1),
+          vx: rand(-2, 2), vy: -rand(1, 3), ch: pick(['·', '˙']),
+          fg: best.pill ? pick([PILL_A, PILL_B]) : SEED, life: rand(0.3, 0.6), rel: false,
         });
-        if (Math.random() < 0.22) this.say(pick(NOMS), 'calm', 1.4);
+        this.eaten = Math.min(6, this.eaten + 1);
+        if (this.nextPoopAt < t) this.nextPoopAt = t + rand(45, 110);
+        if (best.pill) {
+          // gobée… l'effet est immédiat : 5 min de dodo, même en pleine panique
+          this.sedatedUntil = t + SEDATE_SEC;
+          this.feeding = null;
+          this.say('nom nom… zzzz', 'calm', 3);
+        } else if (Math.random() < 0.22) {
+          this.say(pick(NOMS), 'calm', 1.4);
+        }
       }
     }
     return true;
@@ -378,10 +433,29 @@ class Duck {
       this.act = null;
       this.phase = null;
       this.nextBubbleAt = t + 0.3;
-      if (ctx.mode === 'panic') this.say('QUACK !!', 'panic', 2);
+      if (ctx.mode === 'panic' && t >= this.sedatedUntil) this.say('QUACK !!', 'panic', 2);
     }
 
     this.updateSeeds(dt);
+
+    // Sous sédatif : dodo paisible, imperméable aux jauges comme aux graines.
+    if (t < this.sedatedUntil) {
+      this.frame = 'sleep';
+      if (Math.random() < dt * 0.9) this.spawn({
+        x: this.headX(), y: 1, vx: 1.2, vy: -1.4, ch: 'z', fg: 0x9AA0A6, life: 1.8, grav: 0,
+      });
+      this.hop = 0;
+      if (this.bubble && t > this.bubble.until) this.bubble = null;
+      for (const p of this.particles) {
+        p.x += p.vx * dt; p.y += p.vy * dt;
+        if (p.grav) p.vy += 9 * dt;
+        p.life -= dt;
+      }
+      this.particles = this.particles.filter((p) => p.life > 0);
+      return;
+    }
+
+    this.maybePoop();
 
     const target = Math.max(minX, Math.min(maxX, (ctx.targetX || ctx.canvasW / 2) - SPR_W / 2));
     const busy = ctx.mode === 'alert' || ctx.mode === 'panic';
@@ -461,8 +535,8 @@ class Duck {
       yOff = Math.round(((Math.sin(this.t * 2.1) + 1) / 2) * 1.4);
     }
     yOff -= Math.round(this.hop);
-    return { rows, mirror, x: Math.round(this.x), yOff, particles: this.particles, seeds: this.seeds };
+    return { rows, mirror, x: Math.round(this.x), yOff, particles: this.particles, seeds: this.seeds, pills: this.pills, poops: this.poops, t: this.t };
   }
 }
 
-module.exports = { Duck, PAL, SPR_W, SPR_H, SEED };
+module.exports = { Duck, PAL, SPR_W, SPR_H, SEED, PILL_A, PILL_B, POOP, POOP_OLD, POOP_LIFE };

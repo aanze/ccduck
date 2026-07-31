@@ -3,7 +3,7 @@
 // débit, tableau par modèle, pied de page. Conçu pour un panneau étroit (>= 56 col).
 
 const { A_BOLD, A_REV, A_DIM } = require('./ansi');
-const { SPR_W, SPR_H, PAL, SEED } = require('./duck');
+const { SPR_W, SPR_H, PAL, SEED, PILL_A, PILL_B, POOP, POOP_OLD, POOP_LIFE } = require('./duck');
 const { fmtMetric, fmtTok, fmtDur, fmtClock, fmtPct, clip, padR, padL, fmtCost } = require('./format');
 
 const C = {
@@ -99,8 +99,8 @@ function drawMeter(scr, y, m, L, cfg, blinkOn, isWorst) {
     // % toujours canonique (coût pondéré) ; la métrique ne change que ces chiffres
     let figs;
     if (m.official) figs = '• ' + fmtMetric(m.used, snapMetric); // % officiel, dépense estimée à côté
-    else if (snapMetric === 'cost') figs = fmtCost(m.used) + '/' + (m.auto ? '≈' : '') + fmtCost(m.limit);
-    else figs = (m.auto ? '≈ ' : '') + fmtMetric(m.used, snapMetric);
+    else if (m.limit == null || snapMetric !== 'cost') figs = (m.auto ? '≈ ' : '') + fmtMetric(m.used, snapMetric);
+    else figs = fmtCost(m.used) + '/' + (m.auto ? '≈' : '') + fmtCost(m.limit);
     if (L.figsW >= 20 && snapMetric === 'cost') figs += ' · ' + fmtTok(m.tokens);
     scr.text(x, y, padR(clip(figs, L.figsW), L.figsW), C.dim);
     x += L.figsW + 1;
@@ -123,6 +123,20 @@ function drawCanvas(scr, top, rowsN, duckInfo, t) {
   for (const s of duckInfo.seeds || []) {
     const sx = Math.round(s.x), sy = baseY + Math.round(s.y);
     if (sx >= 0 && sx < W && sy >= 0 && sy < H) px[sy * W + sx] = SEED;
+  }
+  // gélules bicolores (2 px : rouge + blanc)
+  for (const p of duckInfo.pills || []) {
+    const sx = Math.round(p.x), sy = baseY + Math.round(p.y);
+    if (sy >= 0 && sy < H) {
+      if (sx >= 0 && sx < W) px[sy * W + sx] = PILL_A;
+      if (sx + 1 >= 0 && sx + 1 < W) px[sy * W + sx + 1] = PILL_B;
+    }
+  }
+  // crottes en dérive (foncées quand elles vont couler)
+  for (const p of duckInfo.poops || []) {
+    const sx = Math.round(p.x), sy = baseY + SPR_H - 1;
+    const old = (duckInfo.t - p.born) > POOP_LIFE - 12;
+    if (sx >= 0 && sx < W && sy >= 0 && sy < H) px[sy * W + sx] = old ? POOP_OLD : POOP;
   }
   for (let r = 0; r < SPR_H; r++) {
     const line = rows[r];
@@ -286,12 +300,11 @@ function draw(scr, state) {
   if (snap.lastError) {
     scr.text(1, fy, clip('⚠ ' + snap.lastError, cols - 2), C.red);
   } else {
-    const keys = '[q]uit [f]eed [r]efresh [m]etric:' + ui.metricLabel + ' [c]table [d]emo' + (ui.paused ? ' ▮▮' : '');
+    const keys = '[q]uit [f]eed [s]edate [r]efresh [m]etric:' + ui.metricLabel + ' [c]table [d]emo' + (ui.paused ? ' ▮▮' : '');
     const bits = [];
     if (snap.officialUsed) {
       const age = Date.now() - snap.officialAt;
-      const src = snap.officialSource === 'cache' ? ' cache' : '';
-      bits.push('• /usage' + src + (age > 30 * 60 * 1000 ? ' (' + fmtDur(age / 1000) + ' old)' : ''));
+      bits.push('• /usage' + (age > 30 * 60 * 1000 ? ' (' + fmtDur(age / 1000) + ' old — open Claude Code)' : ''));
     }
     if (snap.meters.some((m) => m.auto)) bits.push('≈ auto (' + cfg.historyDays + 'd)');
     else if (!snap.officialUsed) bits.push('limits: config');
@@ -322,6 +335,10 @@ function drawMini(scr, state) {
     for (const s of state.duckInfo.seeds || []) {
       if (s.landed) scr.set(Math.round(s.x), y, '∙', SEED);
     }
+    for (const p of state.duckInfo.pills || []) {
+      if (p.landed) { scr.set(Math.round(p.x), y, '∙', PILL_A); scr.set(Math.round(p.x) + 1, y, '∙', PILL_B); }
+    }
+    for (const p of state.duckInfo.poops || []) scr.set(Math.round(p.x), y, '∙', POOP);
     const d = state.duckInfo;
     const body = d.mirror ? '(°)>' : '<(°)';
     let art = body;
