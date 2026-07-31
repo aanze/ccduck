@@ -8,6 +8,8 @@
 //    puis souffle en faisant le tour du bassin, puis y retourne
 //  - nourrissage (touche f) : des graines tombent et flottent ; il accourt (même en
 //    panique), picore un moment, puis reprend ses activités ; le reste flotte pour plus tard
+//  - faim : sans repas depuis 10 min, il vient réclamer plein cadre, à intervalles
+//    réguliers, jusqu'à ce qu'on le nourrisse
 
 const PAL = {
   Y: 0xFFD21E, // corps
@@ -93,6 +95,64 @@ const SPR = {
     '..yyyYYYyy......',
     '.OOYyyyy........',
     '.oYYy...........',
+  ]),
+  // commission en cours : queue relevée (deux images pour un léger frémissement)
+  poopA: F([
+    '................',
+    '....HHYY........',
+    '...HYYYYY.......',
+    '..HYKYYYY....YH.',
+    '.OOYYYYYY...YYY.',
+    '..oYYYYYy..YYYy.',
+    '...YYYYYYYYYYYy.',
+    '..YYYYYYyyyYYY..',
+    '.yYYYYYYyyyyYY..',
+    '.yYYYYYYYyyYy...',
+    '..yyYYYYYYYyy...',
+    '...yyyyyyyyy....',
+  ]),
+  poopB: F([
+    '................',
+    '....HHYY........',
+    '...HYYYYY.......',
+    '..HYKYYYY.......',
+    '.OOYYYYYY....YH.',
+    '..oYYYYYy...YYY.',
+    '...YYYYYYYYYYYy.',
+    '..YYYYYYyyyYYYY.',
+    '.yYYYYYYyyyyYY..',
+    '.yYYYYYYYyyYy...',
+    '..yyYYYYYYYyy...',
+    '...yyyyyyyyy....',
+  ]),
+  // réclamation : grosse tête plein cadre, collée à l'écran, bec qui claque
+  begA: F([
+    '.....HHHHHH.....',
+    '...HHYYYYYYYY...',
+    '..HYYYYYYYYYYy..',
+    '.HYYYYYYYYYYYYy.',
+    '.YYWKYYYYYYKWYy.',
+    '.YYKKYYYYYYKKYy.',
+    '.YYYYYYYYYYYYYy.',
+    '.YYOOOOOOOOOOYy.',
+    '..yOOOOOOOOOOy..',
+    '...oooooooooo...',
+    '....yYYYYYYy....',
+    '.....YYYYYY.....',
+  ]),
+  begB: F([
+    '.....HHHHHH.....',
+    '...HHYYYYYYYY...',
+    '..HYYYYYYYYYYy..',
+    '.HYYYYYYYYYYYYy.',
+    '.YYWKYYYYYYKWYy.',
+    '.YYKKYYYYYYKKYy.',
+    '.YYYYYYYYYYYYYy.',
+    '.YYOOOOOOOOOOYy.',
+    '..yKKKKKKKKKKy..',
+    '...KKKKRRKKKK...',
+    '....OOOOOOOO....',
+    '.....oooooo.....',
   ]),
   // de face : il nous fixe
   front: F([
@@ -234,6 +294,25 @@ const QUACKS = ['quack', 'quack quack', 'squeak', 'wak wak'];
 const ZENS = ['zzz…', 'quack… zzz'];
 const NOMS = ['nom nom nom', 'crunch crunch', '♥'];
 
+// Activités qui changent franchement la silhouette. Enchaîner deux de ces poses
+// sans transition (tête sous l'eau puis sieste dans la même image) casse
+// l'illusion : on intercale toujours un temps mort où il se redresse.
+const POSED = new Set(['dabble', 'preen', 'sleep', 'gaze']);
+// Même idée côté image : tant qu'il tient une de ces poses (ou qu'il panique),
+// on ne lui superpose pas la pose de la crotte.
+const POSE_FRAMES = new Set(['dabble', 'preen', 'sleep', 'front', 'frontBlink', 'frontQuack',
+  'panicA', 'panicB', 'poopA', 'poopB', 'begA', 'begB']);
+
+// Faim : sans repas depuis HUNGRY_AFTER, il vient réclamer plein cadre et remet
+// ça toutes les 1-2 min tant qu'on ne lui a rien donné. Barboter ne compte pas :
+// c'est justement parce qu'il ne trouve rien qu'il vient nous voir.
+// CCDUCK_HUNGRY_SEC raccourcit le délai (mise au point du rendu).
+const HUNGRY_AFTER = Number(process.env.CCDUCK_HUNGRY_SEC) || 600;
+const BEG_EVERY = [60, 120];
+// Bulle imagée : des graines et un point d'interrogation, pas de phrase — le
+// texte reste réservé aux avertissements de limites.
+const BEGS = ['∵ ?', 'QUACK ! ∵', '∵ ∵ ∵ !!'];
+
 function rand(a, b) { return a + Math.random() * (b - a); }
 function pick(arr) { return arr[Math.floor(Math.random() * arr.length)]; }
 function pickWeighted(pairs) {
@@ -263,8 +342,12 @@ class Duck {
     this.poops = [];            // {x, born} — dérivent avec le courant
     this.eaten = 0;             // digestion : pas de repas, pas de plop
     this.nextPoopAt = 0;
+    this.poopPose = null;       // {until, dropAt, dropped} — queue levée le temps de la commission
     this.feeding = null;        // {until}
     this.feedCooldownUntil = 0;
+    this.lastMealAt = 0;        // dernier vrai repas (graine/gélule) — jauge de faim
+    this.nextBegAt = 0;
+    this.beg = null;            // {phase:'come'|'face', until, comeUntil, nextQuack}
     this.eatT = 0;
     this.hop = 0;
     this.t = 0;
@@ -330,6 +413,12 @@ class Duck {
       weights = weights.concat([['gaze', mode === 'zen' ? 12 : 18]]);
     }
     const name = pickWeighted(weights);
+    // Deux poses marquées à la suite : on renonce à celle-ci et on se redresse
+    // d'abord. Le tirage repartira de zéro après ce temps mort.
+    if (POSED.has(name) && POSED.has(this.lastAct)) {
+      this.lastAct = 'settle';
+      return { name: 'settle', x: this.x, speed: 1.2, start: t, until: t + rand(0.9, 1.7) };
+    }
     this.lastAct = name;
     const a = { name, x: this.x, speed: 5, start: t };
     if (name === 'gaze') { a.until = t + 4.4; return a; }
@@ -424,17 +513,73 @@ class Duck {
   }
 
   // Digestion : de temps en temps (et seulement s'il a mangé), un petit plop.
+  // Il prend la pose (queue levée) avant de s'exécuter — cf. runPoopPose.
   maybePoop() {
     const t = this.t;
-    if (this.eaten <= 0 || t < this.nextPoopAt) return;
+    if (this.poopPose || this.eaten <= 0 || t < this.nextPoopAt) return;
+    // jamais par-dessus une autre pose : le rendez-vous n'est pas consommé,
+    // il ira dès qu'il aura repris une allure normale
+    if (this.feeding || POSE_FRAMES.has(this.frame)) return;
     this.eaten--;
     this.nextPoopAt = t + rand(60, 150);
+    this.poopPose = { until: t + rand(2.2, 3), dropAt: t + rand(0.7, 1.1), dropped: false };
+    if (this.act) this.act.speed = Math.min(this.act.speed, 1.2); // on ralentit, c'est plus digne
+  }
+
+  // Queue levée pendant toute la commission, plop à mi-pose. Appelée en fin de
+  // update() : elle écrase l'image choisie par l'activité en cours.
+  runPoopPose() {
+    const t = this.t;
+    const p = this.poopPose;
+    if (t > p.until) { this.poopPose = null; return; }
+    this.frame = (Math.floor(t / 0.45) % 2 === 0) ? 'poopA' : 'poopB';
+    if (p.dropped || t < p.dropAt) return;
+    p.dropped = true;
     const tailX = this.dir < 0 ? this.x + SPR_W - 3 : this.x + 2; // derrière lui
     this.poops.push({ x: Math.max(0, Math.min(this.canvasW - 2, tailX)), born: t });
     // la goutte qui tombe + l'éclaboussure
     this.spawn({ x: tailX, y: SPR_H - 3, vx: 0, vy: 3, ch: '·', fg: POOP_TOP, life: 0.35, rel: false });
     this.spawn({ x: tailX, y: SPR_H - 1, vx: rand(-1, 1), vy: -rand(1, 2), ch: '∘', fg: WATER, life: 0.4, rel: false });
+    this.hop = 1.4;  // petit sursaut de soulagement
     if (Math.random() < 0.5) this.say('plop', 'calm', 1.1);
+  }
+
+  // Déclenche une réclamation si le ventre crie famine et qu'il n'est pas déjà
+  // occupé à autre chose. Le créneau n'est armé qu'ici : tant qu'on ne le
+  // nourrit pas, il repassera toutes les BEG_EVERY.
+  maybeBeg() {
+    const t = this.t;
+    if (this.beg || this.feeding || t - this.lastMealAt < HUNGRY_AFTER) return;
+    if (t < this.nextBegAt || POSE_FRAMES.has(this.frame)) return;
+    this.nextBegAt = t + rand(BEG_EVERY[0], BEG_EVERY[1]);
+    this.beg = { phase: 'come', until: 0, comeUntil: t + 6, nextQuack: 0 };
+    this.act = null;
+  }
+
+  // Réclamation : il traverse le bassin, se plante face à nous et quacke —
+  // grosse tête plein cadre, bulle imagée, éclaboussures.
+  runBeg(dt, minX, maxX) {
+    const t = this.t;
+    const b = this.beg;
+    if (b.phase === 'come') {
+      const center = Math.max(minX, Math.min(maxX, this.canvasW / 2 - SPR_W / 2));
+      if (this.moveToward(center, 18, dt, minX, maxX) && t < b.comeUntil) {
+        this.frame = 'stand';
+        return;
+      }
+      b.phase = 'face';
+      b.until = t + rand(3.5, 5);
+    }
+    if (t > b.until) { this.beg = null; return; }
+    this.frame = (Math.floor(t / 0.18) % 2 === 0) ? 'begA' : 'begB';
+    if (t < b.nextQuack) return;
+    b.nextQuack = t + rand(1, 1.5);
+    this.say(pick(BEGS), 'alert', 1.4);
+    this.hop = 2;                       // il sautille d'impatience
+    for (let i = 0; i < 2; i++) this.spawn({
+      x: this.x + rand(3, SPR_W - 3), y: SPR_H - 1,
+      vx: rand(-3, 3), vy: -rand(2, 5), ch: pick(['∘', '·']), fg: WATER, life: rand(0.4, 0.8), rel: false,
+    });
   }
 
   // Retourne true si le canard est occupé à manger (prioritaire sur tout).
@@ -480,6 +625,8 @@ class Duck {
           fg: best.pill ? pick([PILL_A, PILL_B]) : SEED, life: rand(0.3, 0.6), rel: false,
         });
         this.eaten = Math.min(6, this.eaten + 1);
+        this.lastMealAt = t;
+        this.nextBegAt = 0;   // rassasié : le prochain créneau repartira de zéro
         if (this.nextPoopAt < t) this.nextPoopAt = t + rand(45, 110);
         if (best.pill) {
           // gobée… l'effet est immédiat : 5 min de dodo, même en pleine panique
@@ -528,12 +675,16 @@ class Duck {
     }
 
     this.maybePoop();
+    this.maybeBeg();
 
     const target = Math.max(minX, Math.min(maxX, (ctx.targetX || ctx.canvasW / 2) - SPR_W / 2));
     const busy = ctx.mode === 'alert' || ctx.mode === 'panic';
 
     if (this.tryFeeding(dt, minX, maxX)) {
       // en train de manger : la panique attendra
+      this.beg = null;                 // à table, plus rien à réclamer
+    } else if (this.beg) {
+      this.runBeg(dt, minX, maxX);
     } else if (busy) {
       // ---- cycle : pointer longuement la jauge, puis souffler, puis y retourner ----
       // ctx.soft (jauge premium) : phases de pointage plus courtes, pauses plus longues
@@ -581,6 +732,8 @@ class Duck {
     } else {
       this.runIdleLife(dt, ctx.mode, minX, maxX, false);
     }
+
+    if (this.poopPose) this.runPoopPose();
 
     this.hop = Math.max(0, this.hop - dt * 6);
     if (this.bubble && t > this.bubble.until) this.bubble = null;

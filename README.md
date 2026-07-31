@@ -21,8 +21,13 @@ jaune en pixel art qui vit sa vie sur l'eau… et panique quand tes limites appr
   (« nom nom nom »), puis retourne à ses occupations — les graines restantes flottent
   pour plus tard. Touche `s` pour lâcher une **gélule sédative** bicolore : elle la prend
   pour de la nourriture, la gobe… et s'endort **5 minutes**, paisible, même en pleine
-  panique. Et après un bon repas, un petit « plop » de temps en temps — la crotte dérive
-  au fil de l'eau une minute avant de disparaître.
+  panique. Et après un bon repas, un petit « plop » de temps en temps — queue relevée
+  deux ou trois secondes, le temps de la commission — puis la crotte dérive au fil de
+  l'eau une minute avant de disparaître. Sans repas depuis **10 minutes**, elle vient
+  réclamer : elle traverse le bassin, colle sa grosse tête plein cadre et quacke à
+  s'en décrocher le bec, bulle imagée à l'appui, et elle repasse toutes les 1 à 2 min
+  jusqu'à ce qu'on cède. Deux poses marquées ne s'enchaînent jamais d'une image à
+  l'autre : elle se redresse toujours entre les deux.
 - Optimisé pour le panneau terminal étroit de la fenêtre Claude Code (56 colonnes et plus,
   mode mini en dessous), zéro dépendance, Node ≥ 18. UI en anglais.
 
@@ -49,7 +54,7 @@ Un paquet npm prêt à l'emploi est fourni dans [`dist/`](dist/) (et attaché au
 Releases GitHub). Télécharger le `.tgz` puis :
 
 ```bash
-npm install -g ./ccduck-1.9.1.tgz
+npm install -g ./ccduck-1.10.0.tgz
 ```
 
 (Copie figée : pour mettre à jour, réinstaller le `.tgz` de la version suivante.)
