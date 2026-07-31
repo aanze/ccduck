@@ -311,7 +311,7 @@ function draw(scr, state) {
     const bits = [];
     if (snap.officialUsed) {
       const age = Date.now() - snap.officialAt;
-      bits.push('• /usage' + (age > 30 * 60 * 1000 ? ' (' + fmtDur(age / 1000) + ' old — open Claude Code)' : ''));
+      bits.push('• /usage' + (age > 5 * 60 * 1000 ? ' (' + fmtDur(age / 1000) + ' old)' : ''));
     }
     if (snap.meters.some((m) => m.auto)) bits.push('≈ auto (' + cfg.historyDays + 'd)');
     else if (!snap.officialUsed) bits.push('limits: config');

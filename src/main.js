@@ -99,6 +99,7 @@ async function run(argv) {
   // ---- instantané statique ----
   if (opts.once || (!isTTY && !opts.frames)) {
     store.scanSync();
+    await store.refreshOfficial();
     const screen = new Screen(cols, Math.min(rows, 30), mode);
     const snap = applyDemo(store.snapshot(Date.now(), metric), opts.demo ?? null, 0);
     const duck = new Duck(cols);
@@ -149,7 +150,12 @@ async function run(argv) {
   let quitting = false;
 
   const refreshSnap = () => { snap = store.snapshot(Date.now(), metric); };
-  // Méthode cccat : aucun appel réseau — le cache local est relu à chaque snapshot.
+  // Compteurs officiels : l'intervalle réel est géré dans refreshOfficial (2 min,
+  // backoff sur 429) — ici on se contente de la solliciter régulièrement.
+  const pokeOfficial = () => {
+    store.refreshOfficial().then(() => { if (!pendingScan) refreshSnap(); }).catch(() => {});
+  };
+  pokeOfficial();
 
   const cleanup = () => {
     if (quitting) return;
@@ -178,7 +184,11 @@ async function run(argv) {
     process.stdin.on('data', (buf) => {
       const k = buf.toString('utf8');
       if (k === 'q' || k === 'Q' || k === '\x03') { cleanup(); process.exit(0); }
-      else if (k === 'r' || k === 'R') { if (!pendingScan) pendingScan = store.scanSteps(); }
+      else if (k === 'r' || k === 'R') {
+        if (!pendingScan) pendingScan = store.scanSteps();
+        store.official.nextTryAt = 0; // r = je veux les vrais chiffres maintenant
+        pokeOfficial();
+      }
       else if (k === 'm' || k === 'M') { metric = METRICS[(METRICS.indexOf(metric) + 1) % METRICS.length]; refreshSnap(); }
       else if (k === 'f' || k === 'F') { duck.feed(); }
       else if (k === 's' || k === 'S') { duck.dropPill(); }
@@ -242,6 +252,7 @@ async function run(argv) {
   const animTimer = setInterval(tick, Math.max(40, Math.round(1000 / (cfg.fps || 10))));
   const refreshTimer = setInterval(() => {
     if (!pendingScan) pendingScan = store.scanSteps();
+    pokeOfficial();
   }, Math.max(3, cfg.refreshSec || 10) * 1000);
   tick();
 }

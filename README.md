@@ -49,7 +49,7 @@ Un paquet npm prêt à l'emploi est fourni dans [`dist/`](dist/) (et attaché au
 Releases GitHub). Télécharger le `.tgz` puis :
 
 ```bash
-npm install -g ./ccduck-1.5.2.tgz
+npm install -g ./ccduck-1.6.0.tgz
 ```
 
 (Copie figée : pour mettre à jour, réinstaller le `.tgz` de la version suivante.)
@@ -80,25 +80,29 @@ typiquement `%APPDATA%\npm` sous Windows) est dans le `PATH`, puis rouvrir le te
 
 ## D'où viennent les chiffres ?
 
-**Aucune connexion à faire, aucune clé à fournir** — architecture « cache d'abord »
-(même approche que [cccat](https://github.com/Glance-mediametrie/cccat)) :
+**Aucune connexion à faire, aucune clé à fournir** — trois sources, dans cet ordre :
 
-1. **Cache officiel local** (`•`, primaire) : `~/.claude/vscode-claude-status-cache.json`,
-   que Claude Code rafraîchit **à chaque échange avec l'API** — donc toujours frais
-   pendant que tu consommes, précisément quand les chiffres comptent. Relu toutes les
-   ~10 s : zéro réseau, zéro rate-limit, zéro décrochage. S'il vieillit (> 30 min), le
-   pied de page l'indique (« open Claude Code »).
-2. **Jauge FABLE = formule cccat, toujours** (`≈`) : part de tokens fable dans les
-   transcripts × hebdo officiel ÷ part premium (~50 % de l'enveloppe, `premiumShare`).
-   Recalculée en continu sur des données fraîches — c'est la méthode qui colle aux
-   chiffres de l'écran `/usage`.
-3. **Endpoint officiel** (roue de secours) : `api.anthropic.com/api/oauth/usage` avec le
-   token OAuth déjà présent sur le poste — appelé seulement si le cache local manque ou
-   décroche (au plus 1 appel / 30 min sinon), backoff persistant sur 429, token jamais
-   loggé ni envoyé ailleurs que chez Anthropic. `ccduck --debug-usage` pour le diagnostic.
-4. **Estimation locale** (`≈`) : lecture des transcripts (`~/.claude/projects/**/*.jsonl`),
-   déduplication, agrégation par modèle — la source des coûts, débits, projections et du
-   tableau (infos que `/usage` ne donne pas), et dernier recours pour les jauges.
+1. **Endpoint officiel `/usage`** (`•`, source de vérité) :
+   `api.anthropic.com/api/oauth/usage`, authentifié avec le token OAuth **déjà présent**
+   sur le poste (`~/.claude/.credentials.json`, ou le Trousseau sur macOS). C'est
+   littéralement ce qu'affiche l'écran `/usage` de Claude Code — **les trois jauges,
+   bucket Fable compris**, resets exacts. Rafraîchi toutes les ~2 min (jitter pour ne pas
+   marteler l'endpoint), dernière valeur persistée dans `~/.ccduck-usage.json` pour les
+   relances, backoff respecté sur 429, `r` force un rafraîchissement immédiat. Le token
+   n'est jamais loggé ni envoyé ailleurs que chez Anthropic ; `ccduck --debug-usage`
+   affiche la réponse brute.
+2. **Cache local de Claude Code** : `~/.claude/vscode-claude-status-cache.json` — utilisé
+   par fenêtre **uniquement s'il est plus récent** que la dernière réponse API. Attention :
+   ce fichier n'est alimenté que quand l'extension VS Code tourne ; sur les autres postes
+   il fige (parfois plusieurs heures), d'où la règle « le plus frais gagne ».
+3. **Estimation locale** (`≈`) : lecture des transcripts (`~/.claude/projects/**/*.jsonl`),
+   déduplication, agrégation par modèle — source des coûts, débits, projections et du
+   tableau (infos que `/usage` ne donne pas), et repli des jauges si aucune donnée
+   officielle n'est disponible. Pour Fable sans bucket officiel, formule
+   [cccat](https://github.com/Glance-mediametrie/cccat) : part de tokens fable sur 7 j
+   glissants × hebdo officiel ÷ `premiumShare` (~50 % de l'enveloppe).
+
+L'âge de la donnée officielle est affiché en pied de page dès qu'elle dépasse 5 minutes.
 
 Il n'y a **pas de jauge journalière** : cette limite n'existe pas chez Anthropic (les
 limites réelles sont le bloc de 5 h et les quotas hebdomadaires). Le total du jour reste

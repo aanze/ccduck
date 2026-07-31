@@ -125,12 +125,6 @@ class DataStore {
     const o = this.official;
     const now = Date.now();
     if (o.inFlight || now < o.nextTryAt) return;
-    // Politique cccat : l'API n'est qu'une roue de secours pour session/hebdo
-    // quand le cache local décroche → au plus 1 appel / 30 min si le cache est sain.
-    const c = readOfficialUsage(process.env);
-    const cacheCovers = !!(c && c.u5h != null && c.reset5h > now && c.u7d != null
-      && c.reset7d > now && now - c.at < 20 * 60 * 1000);
-    if (cacheCovers && now - o.fetchedAt < 30 * 60 * 1000) return;
     const token = readOAuthToken(process.env);
     if (!token) { o.lastErr = 'no token'; o.nextTryAt = now + 10 * 60 * 1000; saveOfficialState(o); return; }
     o.inFlight = true;
@@ -190,10 +184,9 @@ class DataStore {
       }
       o.raw = j; // pour --debug-usage (contient uniquement des stats, jamais le token)
       o.fetchedAt = now;
-      // 5 min ± jitter : plusieurs postes derrière la même IP de sortie ne doivent
-      // pas marteler l'endpoint en cadence (son budget est petit et partagé avec
-      // l'écran /usage de Claude Code lui-même).
-      o.nextTryAt = now + 300 * 1000 + (Math.random() * 120 * 1000 - 60 * 1000);
+      // 2 min ± jitter : assez réactif pour suivre la conso, assez espacé pour ne
+      // pas déclencher le 429 (jitter = postes derrière la même IP désynchronisés).
+      o.nextTryAt = now + 120 * 1000 + Math.random() * 40 * 1000;
       o.lastErr = null;
       saveOfficialState(o);
     } catch (e) {
@@ -338,19 +331,27 @@ class DataStore {
     }
     const active = blocks.length && now < blocks[blocks.length - 1].end ? blocks[blocks.length - 1] : null;
 
-    // MÉTHODE CCCAT, POINT FINAL : les jauges session/hebdo affichent le cache
-    // local (utilization5h/7d) TEL QUEL, avec son âge en pied de page. Pas de
-    // garde-fou "intelligent", pas de mélange avec l'API, pas d'appel réseau —
-    // c'est exactement ce que fait cccat et c'est ce qui colle à /usage.
-    // (L'API OAuth ne sert plus qu'au diagnostic --debug-usage.)
+    // Source de vérité : l'endpoint /usage (mêmes chiffres que l'écran de Claude
+    // Code, bucket Fable compris). Le cache local `vscode-claude-status-cache.json`
+    // n'est utilisé que s'il est PLUS RÉCENT que la dernière réponse API — sur les
+    // postes où l'extension VS Code ne tourne pas, il fige et ment de plusieurs
+    // heures. Par fenêtre, la donnée la plus fraîche gagne ; jamais de mélange.
     const od = this.official;
     const cacheU = readOfficialUsage(process.env);
+    const freshest = (apiWin, cachePct, cacheReset) => {
+      const c = [];
+      if (apiWin && apiWin.reset > now) c.push({ pct: apiWin.pct, reset: apiWin.reset, at: od.fetchedAt });
+      if (cacheU && cachePct != null && cacheReset > now) c.push({ pct: cachePct, reset: cacheReset, at: cacheU.at });
+      c.sort((a, b) => b.at - a.at);
+      return c[0] || null;
+    };
+    const s5 = freshest(od.data && od.data.five_hour, cacheU && cacheU.u5h, cacheU && cacheU.reset5h);
+    const s7 = freshest(od.data && od.data.seven_day, cacheU && cacheU.u7d, cacheU && cacheU.reset7d);
+    const offPrem = od.premium && od.premium.reset > now ? od.premium : null;
     const off = {
-      u5h: cacheU && cacheU.u5h != null ? cacheU.u5h : null,
-      reset5h: cacheU ? cacheU.reset5h : 0,
-      u7d: cacheU && cacheU.u7d != null ? cacheU.u7d : null,
-      reset7d: cacheU ? cacheU.reset7d : 0,
-      at: cacheU ? cacheU.at : 0,
+      u5h: s5 ? s5.pct : null, reset5h: s5 ? s5.reset : 0,
+      u7d: s7 ? s7.pct : null, reset7d: s7 ? s7.reset : 0,
+      at: Math.max(s5 ? s5.at : 0, s7 ? s7.at : 0, offPrem ? od.fetchedAt : 0),
     };
     const off5 = off.u5h != null;
     const off7 = off.u7d != null;
@@ -375,9 +376,10 @@ class DataStore {
       weekStart = now - 7 * 86400 * 1000;
     }
 
-    // Famille premium suivie par la 3e jauge
+    // Famille premium suivie par la 3e jauge (nom officiel prioritaire)
     let premiumFam = cfg.premiumFamily;
-    if (premiumFam === 'auto') {
+    if (offPrem) premiumFam = offPrem.name;
+    else if (premiumFam === 'auto') {
       const recent = now - 14 * 86400 * 1000;
       premiumFam = es.some((e) => e.fam === 'fable' && e.ts > recent) ? 'fable'
         : es.some((e) => e.fam === 'opus' && e.ts > recent) ? 'opus' : 'fable';
@@ -479,7 +481,11 @@ class DataStore {
         weekReset ? (weekReset - now) / 1000 : null, weekReset ? null : '7d rolling');
     }
     const premTok = premium.i + premium.o + premium.cw + premium.cr;
-    if (off7 && roll.tot > 0) {
+    if (offPrem) {
+      // bucket officiel weekly_scoped (Fable/Opus) — la vraie valeur de /usage
+      push('premium', premiumFam.toUpperCase() + ' 7d', premium.val, premium.cost, premTok, null,
+        (offPrem.reset - now) / 1000, null, { pct: offPrem.pct * 100 });
+    } else if (off7 && roll.tot > 0) {
       // Formule cccat, TOUJOURS, avec SES entrées exactes : part de tokens premium
       // sur fenêtre GLISSANTE 7 j × hebdo officiel ÷ plafond premium (~50 %).
       const share = cfg.premiumShare > 0 ? cfg.premiumShare : 0.5;
@@ -517,7 +523,7 @@ class DataStore {
       burnPerMin, burnTokPerMin, projPct,
       day, byFamDay,
       officialAt: off.at,
-      officialUsed: off5 || off7,
+      officialUsed: off5 || off7 || !!offPrem,
       officialErr: od.lastErr,
       officialRetryIn: Math.max(0, od.nextTryAt - now),
       entryCount: this.entries.size,
