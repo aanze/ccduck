@@ -338,33 +338,28 @@ class DataStore {
     }
     const active = blocks.length && now < blocks[blocks.length - 1].end ? blocks[blocks.length - 1] : null;
 
-    // Compteurs officiels — approche cccat : la source PRIMAIRE est le cache local
-    // que Claude Code rafraîchit à chaque échange avec l'API (donc frais pendant
-    // qu'on consomme, exactement quand ça compte) ; relu à chaque snapshot, zéro
-    // réseau, zéro rate-limit. L'API OAuth n'est qu'un complément espacé (bucket
-    // Fable exact). Par fenêtre, on garde la source la plus récemment mise à jour
-    // dont la fenêtre court toujours (reset dans le futur).
+    // MÉTHODE CCCAT, POINT FINAL : les jauges session/hebdo affichent le cache
+    // local (utilization5h/7d) TEL QUEL, avec son âge en pied de page. Pas de
+    // garde-fou "intelligent", pas de mélange avec l'API, pas d'appel réseau —
+    // c'est exactement ce que fait cccat et c'est ce qui colle à /usage.
+    // (L'API OAuth ne sert plus qu'au diagnostic --debug-usage.)
     const od = this.official;
     const cacheU = readOfficialUsage(process.env);
-    const cand5 = [], cand7 = [];
-    if (cacheU && cacheU.u5h != null && cacheU.reset5h > now) cand5.push({ pct: cacheU.u5h, reset: cacheU.reset5h, at: cacheU.at });
-    if (cacheU && cacheU.u7d != null && cacheU.reset7d > now) cand7.push({ pct: cacheU.u7d, reset: cacheU.reset7d, at: cacheU.at });
-    if (od.data && od.data.five_hour && od.data.five_hour.reset > now) cand5.push({ pct: od.data.five_hour.pct, reset: od.data.five_hour.reset, at: od.fetchedAt });
-    if (od.data && od.data.seven_day && od.data.seven_day.reset > now) cand7.push({ pct: od.data.seven_day.pct, reset: od.data.seven_day.reset, at: od.fetchedAt });
-    const newest = (arr) => arr.sort((a, b) => b.at - a.at)[0] || null;
-    const sess5 = newest(cand5), sess7 = newest(cand7);
     const off = {
-      u5h: sess5 ? sess5.pct : null, reset5h: sess5 ? sess5.reset : 0,
-      u7d: sess7 ? sess7.pct : null, reset7d: sess7 ? sess7.reset : 0,
-      at: Math.max(sess5 ? sess5.at : 0, sess7 ? sess7.at : 0),
+      u5h: cacheU && cacheU.u5h != null ? cacheU.u5h : null,
+      reset5h: cacheU ? cacheU.reset5h : 0,
+      u7d: cacheU && cacheU.u7d != null ? cacheU.u7d : null,
+      reset7d: cacheU ? cacheU.reset7d : 0,
+      at: cacheU ? cacheU.at : 0,
     };
-    const off5 = !!sess5, off7 = !!sess7;
+    const off5 = off.u5h != null;
+    const off7 = off.u7d != null;
 
     // Fenêtres jour / semaine
     const midnight = new Date(now); midnight.setHours(0, 0, 0, 0);
     const dayStart = midnight.getTime();
     let weekStart, weekReset = null;
-    if (off7) {
+    if (off7 && off.reset7d > now) {
       // fenêtre hebdo officielle
       weekStart = off.reset7d - D7;
       weekReset = off.reset7d;
@@ -391,6 +386,8 @@ class DataStore {
     const day = zero(), week = zero(), premium = zero(), hour = zero();
     const byFamDay = {};
     const hourAgo = now - 3600 * 1000;
+    const rollStart = now - D7; // fenêtre glissante 7 j — celle de la formule cccat
+    const roll = { prem: 0, tot: 0 };
     for (const e of es) {
       if (e.ts >= dayStart) {
         acc(day, e);
@@ -399,6 +396,11 @@ class DataStore {
       if (e.ts >= weekStart) {
         acc(week, e);
         if (e.fam === premiumFam) acc(premium, e);
+      }
+      if (e.ts >= rollStart) {
+        const tok = e.i + e.o + e.cw5 + e.cw1 + e.cr;
+        roll.tot += tok;
+        if (e.fam === premiumFam) roll.prem += tok;
       }
       if (e.ts >= hourAgo) acc(hour, e);
     }
@@ -461,7 +463,7 @@ class DataStore {
     const estBlockTok = active ? active.sum.i + active.sum.o + active.sum.cw + active.sum.cr : 0;
     if (off5) {
       push('session', 'SESSION 5h', estBlockVal, estBlockCost, estBlockTok, null,
-        (off.reset5h - now) / 1000, null, { pct: off.u5h * 100 });
+        off.reset5h > now ? (off.reset5h - now) / 1000 : null, null, { pct: off.u5h * 100 });
     } else {
       push('session', 'SESSION 5h', estBlockVal, estBlockCost, estBlockTok,
         lim('session', maxBlock, estBlockCost),
@@ -470,20 +472,18 @@ class DataStore {
     const weekTok = week.i + week.o + week.cw + week.cr;
     if (off7) {
       push('week', 'WEEK', week.val, week.cost, weekTok, null,
-        (off.reset7d - now) / 1000, null, { pct: off.u7d * 100 });
+        off.reset7d > now ? (off.reset7d - now) / 1000 : null, null, { pct: off.u7d * 100 });
     } else {
       push('week', 'WEEK', week.val, week.cost, weekTok,
         lim('week', maxWeek, week.cost),
         weekReset ? (weekReset - now) / 1000 : null, weekReset ? null : '7d rolling');
     }
     const premTok = premium.i + premium.o + premium.cw + premium.cr;
-    const weekTokAll = week.i + week.o + week.cw + week.cr;
-    if (off7 && weekTokAll > 0) {
-      // Formule cccat, TOUJOURS : part de tokens premium × hebdo officiel ÷ plafond
-      // premium (~50 % de l'enveloppe hebdo). Recalculée en continu sur les
-      // transcripts frais — plus fiable qu'un bucket API qui peut dater.
+    if (off7 && roll.tot > 0) {
+      // Formule cccat, TOUJOURS, avec SES entrées exactes : part de tokens premium
+      // sur fenêtre GLISSANTE 7 j × hebdo officiel ÷ plafond premium (~50 %).
       const share = cfg.premiumShare > 0 ? cfg.premiumShare : 0.5;
-      const pct = Math.min(150, ((premTok / weekTokAll) * off.u7d / share) * 100);
+      const pct = Math.min(100, ((roll.prem / roll.tot) * off.u7d / share) * 100);
       meters.push({
         key: 'premium', label: premiumFam.toUpperCase() + ' 7d',
         used: premium.val, tokens: premTok, limit: null, auto: true, official: false,
