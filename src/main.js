@@ -39,6 +39,8 @@ function parseArgs(argv) {
     else if (a === '--config') o.config = eat();
     else if (a === '--no-color') o.noColor = true;
     else if (a === '--debug-usage') o.debugUsage = true;
+    else if (a === '--mirror') o.mirror = true;
+    else if (a === '--mirror-watch') { o.mirror = true; o.mirrorWatch = true; }
     else o._.push(a);
   }
   return o;
@@ -80,14 +82,42 @@ async function run(argv) {
 
   const store = new DataStore(cfg);
 
+  // ---- miroir : recopie le relevé de l'app dans le home ----
+  // Nécessaire quand le terminal n'a pas accès à %APPDATA%\Claude : à lancer
+  // depuis un contexte qui, lui, y accède (--mirror-watch pour rester en tâche
+  // de fond). Le fichier ne contient que des pourcentages d'usage.
+  if (opts.mirror) {
+    const fsx = require('fs'), pth = require('path'), osx = require('os');
+    const { planUsageDirs } = require('./data');
+    const dest = pth.join(osx.homedir(), '.ccduck-plan.json');
+    const copyOnce = () => {
+      for (const d of planUsageDirs(process.env, cfg)) {
+        const src = pth.join(d, 'plan-usage-history.json');
+        if (src === dest) continue;
+        try {
+          const raw = fsx.readFileSync(src, 'utf8');
+          JSON.parse(raw); // ne recopier qu'un JSON complet
+          fsx.writeFileSync(dest, raw);
+          return src;
+        } catch (e) { /* suivant */ }
+      }
+      return null;
+    };
+    const first = copyOnce();
+    console.log(first ? 'mirrored ' + first + '\n       -> ' + dest : 'mirror failed: source file not readable from here');
+    if (!opts.mirrorWatch) return;
+    console.log('watching (Ctrl+C to stop) — refresh every 60s');
+    setInterval(copyOnce, 60000);
+    return;
+  }
+
   // ---- diagnostic : état persisté + appel forcé à l'endpoint officiel ----
   if (opts.debugUsage) {
     const o = store.official;
-    const { readOAuthCreds, readPlanUsage, planUsageDirs } = require('./data');
-    const fsx = require('fs'), pth = require('path');
+    const { readOAuthCreds, readPlanUsage, planUsageFiles } = require('./data');
+    const fsx = require('fs');
     console.log('Claude app usage file (source #1) — candidate paths:');
-    for (const d of planUsageDirs(process.env, cfg)) {
-      const f = pth.join(d, 'plan-usage-history.json');
+    for (const f of planUsageFiles(process.env, cfg)) {
       let mark = 'missing';
       try { const st = fsx.statSync(f); mark = 'FOUND (' + st.size + ' bytes, ' + Math.round((Date.now() - st.mtimeMs) / 1000) + 's ago)'; } catch (e) { mark = e.code || 'missing'; }
       console.log('  ' + mark.padEnd(34) + f);

@@ -145,6 +145,19 @@ function fetchUsage(token, userAgent, timeoutMs) {
 // SOURCE LA PLUS FIABLE : l'app Claude enregistre son propre relevé d'usage toutes
 // les 5 min dans plan-usage-history.json — `fh` = session 5 h, `sd` = hebdo (en %).
 // Aucun token, aucun appel réseau : ni 401 ni 429 possibles.
+// Fichiers candidats, dans l'ordre de préférence.
+function planUsageFiles(env, cfg) {
+  const out = [];
+  const addFile = (f) => { if (f && !out.includes(f)) out.push(f); };
+  let home = null;
+  try { home = os.homedir(); } catch (e) { /* ignore */ }
+  // Miroir dans le home : seule voie quand le terminal n'a pas accès au dossier
+  // de l'application (cf. --debug-usage). Alimenté par `ccduck --mirror`.
+  if (home) addFile(path.join(home, '.ccduck-plan.json'));
+  for (const d of planUsageDirs(env, cfg)) addFile(path.join(d, 'plan-usage-history.json'));
+  return out;
+}
+
 function planUsageDirs(env, cfg) {
   const dirs = [];
   const add = (d) => { if (d && !dirs.includes(d)) dirs.push(d); };
@@ -182,10 +195,8 @@ function readOnce(p) {
 }
 
 function readPlanUsage(env, cfg) {
-  const dirs = planUsageDirs(env, cfg);
   let why = null;
-  for (const d of dirs) {
-    const p = path.join(d, 'plan-usage-history.json');
+  for (const p of planUsageFiles(env, cfg)) {
     try {
       const j = readOnce(p);
       const arr = Array.isArray(j.samples) ? j.samples : null;
@@ -543,7 +554,10 @@ class DataStore {
 
     // Fable : seule l'API expose ce compteur. Si l'hebdo a bougé depuis le dernier
     // relevé Fable, on l'ajuste dans la même proportion (marqué ≈).
-    let offPrem = od.premium && od.premium.reset > now ? { ...od.premium } : null;
+    // même règle de fraîcheur que les autres jauges : un relevé Fable de plusieurs
+    // heures ne doit pas s'afficher comme officiel
+    let offPrem = od.premium && od.premium.reset > now && now - od.fetchedAt < MAXAGE
+      ? { ...od.premium } : null;
     let premEstimated = false;
     if (offPrem && s7 && api7 && api7.pct > 0 && s7.at > od.fetchedAt + 60000) {
       const ratio = s7.pct / api7.pct;
@@ -747,4 +761,4 @@ class DataStore {
   }
 }
 
-module.exports = { DataStore, familyOf, entryCost, entryMetric, readOAuthCreds, readPlanUsage, planUsageDirs };
+module.exports = { DataStore, familyOf, entryCost, entryMetric, readOAuthCreds, readPlanUsage, planUsageDirs, planUsageFiles };
