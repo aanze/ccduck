@@ -83,6 +83,13 @@ async function run(argv) {
   // ---- diagnostic : état persisté + appel forcé à l'endpoint officiel ----
   if (opts.debugUsage) {
     const o = store.official;
+    const { readOAuthCreds } = require('./data');
+    const cr = readOAuthCreds(process.env);
+    console.log('oauth token: ' + (cr
+      ? (cr.expiresAt ? 'expires ' + new Date(cr.expiresAt).toLocaleString()
+          + (cr.expiresAt < Date.now() ? '  ← EXPIRED (Claude Code must refresh it)' : '  (valid)')
+        : 'no expiry field')
+      : 'NOT FOUND'));
     console.log('persisted state (~/.ccduck-usage.json):');
     console.log(JSON.stringify({
       fetchedAt: o.fetchedAt ? new Date(o.fetchedAt).toISOString() : null,
@@ -161,6 +168,7 @@ async function run(argv) {
     quitting = true;
     clearInterval(animTimer);
     clearInterval(refreshTimer);
+    clearInterval(officialTimer);
     try { if (process.stdin.isTTY) process.stdin.setRawMode(false); } catch (e) { /* ignore */ }
     process.stdin.pause();
     process.stdout.write(term.altOff);
@@ -250,8 +258,11 @@ async function run(argv) {
   const animTimer = setInterval(tick, Math.max(40, Math.round(1000 / (cfg.fps || 10))));
   const refreshTimer = setInterval(() => {
     if (!pendingScan) pendingScan = store.scanSteps();
-    pokeOfficial();
   }, Math.max(3, cfg.refreshSec || 10) * 1000);
+  // Sonde légère : refreshOfficial décide seul s'il doit appeler (cadence, backoff,
+  // token renouvelé). Battre à 3 s permet de repartir dès que Claude Code
+  // renouvelle le token, sans jamais marteler l'endpoint.
+  const officialTimer = setInterval(pokeOfficial, 3000);
   tick();
 }
 

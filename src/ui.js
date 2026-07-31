@@ -251,12 +251,12 @@ function draw(scr, state) {
   if (ui.demoLabel) scr.text(hx + sub.length + 1, y, ' ' + ui.demoLabel + ' ', C.red, null, A_REV | A_BOLD);
   // âge de la donnée OFFICIELLE (pas du rescan des transcripts) : c'est elle que
   // portent les jauges, donc c'est sa fraîcheur qui doit être affichée
+  // L'app Claude échantillonne toutes les 5 min : un âge sous 8 min est normal.
   const usageAge = snap.officialAt ? Math.round((Date.now() - snap.officialAt) / 1000) : null;
-  const failing = !!snap.officialErr;
+  const stale = usageAge == null || usageAge > 8 * 60;
   const right = fmtClock(new Date())
-    + (usageAge != null ? ' · usage ' + fmtDur(usageAge) + (failing ? ' ⚠' : '') : '');
-  const stale = usageAge != null && usageAge > 300;
-  scr.text(cols - right.length - 1, y, right, failing ? C.red : stale ? C.orange : C.faint);
+    + (usageAge != null ? ' · usage ' + fmtDur(usageAge) + (stale ? ' ⚠' : '') : '');
+  scr.text(cols - right.length - 1, y, right, stale ? C.orange : C.faint);
   y++;
   scr.hline(y++, 0, cols - 1, '─', C.faint);
 
@@ -317,9 +317,9 @@ function draw(scr, state) {
     if (snap.officialUsed) bits.push('• /usage');
     if (snap.meters.some((m) => m.auto)) bits.push('≈ auto (' + cfg.historyDays + 'd)');
     else if (!snap.officialUsed) bits.push('limits: config');
-    if (snap.officialErr) {
-      bits.push('usage: ' + snap.officialErr + (snap.officialRetryIn > 0 ? ' (retry ' + fmtDur(snap.officialRetryIn / 1000) + ')' : ''));
-    }
+    // l'erreur API n'a d'importance que si les chiffres affichés vieillissent
+    const usageAge = snap.officialAt ? (Date.now() - snap.officialAt) / 1000 : Infinity;
+    if (snap.officialErr && usageAge > 8 * 60) bits.push('usage: ' + snap.officialErr);
     const lim = bits.join(' · ');
     scr.text(1, fy, clip(keys + '  ·  ' + lim, cols - 2), C.faint);
   }

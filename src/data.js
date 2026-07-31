@@ -18,15 +18,22 @@ const D7 = 7 * 86400 * 1000;
 // (GET https://api.anthropic.com/api/oauth/usage, Bearer = token local de
 // ~/.claude/.credentials.json). Même mécanisme que les statuslines communautaires.
 // Le token ne quitte jamais la machine autrement que vers api.anthropic.com.
-function readOAuthToken(env) {
+// Renvoie {token, expiresAt, mtime}. On NE touche JAMAIS au refreshToken : chez
+// Anthropic il tourne à chaque usage, l'utiliser déconnecterait Claude Code.
+// On se contente de suivre le fichier : dès que Claude Code renouvelle le token,
+// le mtime change et on repart immédiatement.
+function readOAuthCreds(env) {
   const paths = [];
   if (env.CLAUDE_CONFIG_DIR) paths.push(path.join(env.CLAUDE_CONFIG_DIR, '.credentials.json'));
   paths.push(path.join(os.homedir(), '.claude', '.credentials.json'));
   for (const p of paths) {
     try {
+      const st = fs.statSync(p);
       const j = JSON.parse(fs.readFileSync(p, 'utf8'));
       const o = j.claudeAiOauth || j;
-      if (o && typeof o.accessToken === 'string' && o.accessToken) return o.accessToken;
+      if (o && typeof o.accessToken === 'string' && o.accessToken) {
+        return { token: o.accessToken, expiresAt: Number(o.expiresAt) || 0, mtime: st.mtimeMs };
+      }
     } catch (e) { /* absent : on retombera sur cache/estimation */ }
   }
   // macOS : Claude Code range le token dans le Trousseau, pas dans un fichier
@@ -38,7 +45,9 @@ function readOAuthToken(env) {
       ).toString().trim();
       const j = JSON.parse(out);
       const o = j.claudeAiOauth || j;
-      if (o && typeof o.accessToken === 'string' && o.accessToken) return o.accessToken;
+      if (o && typeof o.accessToken === 'string' && o.accessToken) {
+        return { token: o.accessToken, expiresAt: Number(o.expiresAt) || 0, mtime: 0 };
+      }
     } catch (e) { /* trousseau vide/refusé */ }
   }
   return null;
@@ -133,6 +142,31 @@ function fetchUsage(token, userAgent, timeoutMs) {
   });
 }
 
+// SOURCE LA PLUS FIABLE : l'app Claude enregistre son propre relevé d'usage toutes
+// les 5 min dans plan-usage-history.json — `fh` = session 5 h, `sd` = hebdo (en %).
+// Aucun token, aucun appel réseau : ni 401 ni 429 possibles.
+function readPlanUsage(env) {
+  const dirs = [];
+  if (env.APPDATA) dirs.push(path.join(env.APPDATA, 'Claude'));
+  dirs.push(path.join(os.homedir(), 'AppData', 'Roaming', 'Claude'));
+  dirs.push(path.join(os.homedir(), 'Library', 'Application Support', 'Claude'));
+  dirs.push(path.join(os.homedir(), '.config', 'Claude'));
+  for (const d of dirs) {
+    try {
+      const j = JSON.parse(fs.readFileSync(path.join(d, 'plan-usage-history.json'), 'utf8'));
+      const arr = Array.isArray(j.samples) ? j.samples : null;
+      if (!arr || !arr.length) continue;
+      const last = arr[arr.length - 1];
+      if (!last || !last.u) continue;
+      const u5 = typeof last.u.fh === 'number' ? last.u.fh / 100 : null;
+      const u7 = typeof last.u.sd === 'number' ? last.u.sd / 100 : null;
+      if (u5 == null && u7 == null) continue;
+      return { u5h: u5, u7d: u7, at: Number(last.t) || 0 };
+    } catch (e) { /* app non installée ici */ }
+  }
+  return null;
+}
+
 // Repli : cache local écrit par l'extension VS Code / la statusline (parfois périmé).
 function readOfficialUsage(env) {
   const paths = [];
@@ -185,6 +219,7 @@ class DataStore {
     this.seq = 0;
     this.ccVersion = null;          // version de Claude Code vue dans les transcripts (pour le User-Agent)
     this.lastEntryTs = 0;           // horodatage du dernier message vu → détecte la conso en cours
+    this.credsMtime = 0;            // suit le renouvellement du token par Claude Code
     this.official = loadOfficialState();
   }
 
@@ -198,16 +233,39 @@ class DataStore {
     if (o.inFlight) return;
     // une autre instance a peut-être déjà rafraîchi : en profiter avant de décider
     adoptDiskIfNewer(o);
-    if (!force) {
+
+    const creds = readOAuthCreds(process.env);
+    if (!creds) { o.lastErr = 'no token'; o.nextTryAt = now + 10 * 60 * 1000; saveOfficialState(o); return; }
+    // Claude Code vient de renouveler le token → on repart tout de suite
+    const rotated = this.credsMtime && creds.mtime && creds.mtime !== this.credsMtime;
+    this.credsMtime = creds.mtime;
+    if (rotated) { o.nextTryAt = 0; o.fails = 0; }
+
+    // Token expiré : inutile de brûler du quota pour un 401 garanti. On attend que
+    // Claude Code le renouvelle (surveillance du fichier, vérif toutes les 5 s).
+    if (creds.expiresAt && creds.expiresAt < now + 5000 && !rotated) {
+      o.lastErr = 'token expired (Claude Code will refresh)';
+      o.nextTryAt = now + 5000;
+      saveOfficialState(o);
+      return;
+    }
+
+    if (!force && !rotated) {
       if (now < o.nextTryAt) return;
       const consuming = this.lastEntryTs > o.fetchedAt;
-      if (now - o.fetchedAt < (consuming ? 45 * 1000 : 180 * 1000)) return;
+      if (now - o.fetchedAt < (consuming ? 25 * 1000 : 90 * 1000)) return;
     }
-    const token = readOAuthToken(process.env);
-    if (!token) { o.lastErr = 'no token'; o.nextTryAt = now + 10 * 60 * 1000; saveOfficialState(o); return; }
     o.inFlight = true;
     try {
-      const res = await fetchUsage(token, 'claude-code/' + (this.ccVersion || '2.1.219'), 15000);
+      const res = await fetchUsage(creds.token, 'claude-code/' + (this.ccVersion || '2.1.219'), 15000);
+      if (res.status === 401) {
+        // token périmé côté serveur : on rebascule sur la surveillance du fichier
+        o.lastErr = 'token expired (Claude Code will refresh)';
+        o.fails = 0;
+        o.nextTryAt = now + 8000;
+        saveOfficialState(o);
+        return;
+      }
       if (res.status === 429) {
         // retry-after imposé par le serveur (secondes ou date HTTP) — le respecter
         // scrupuleusement : les 429 de cet endpoint s'aggravent si on insiste.
@@ -223,7 +281,7 @@ class DataStore {
       if (res.status < 200 || res.status >= 300) {
         o.lastErr = 'http ' + res.status;
         o.fails = (o.fails || 0) + 1;
-        o.nextTryAt = now + (res.status === 401 ? 10 * 60 * 1000 : Math.min(20000 * 2 ** (o.fails - 1), 300000));
+        o.nextTryAt = now + Math.min(15000 * 2 ** (o.fails - 1), 120000);
         saveOfficialState(o);
         return;
       }
@@ -411,20 +469,44 @@ class DataStore {
     // heures. Par fenêtre, la donnée la plus fraîche gagne ; jamais de mélange.
     const od = this.official;
     const cacheU = readOfficialUsage(process.env);
-    const freshest = (apiWin, cachePct, cacheReset) => {
-      const c = [];
-      if (apiWin && apiWin.reset > now) c.push({ pct: apiWin.pct, reset: apiWin.reset, at: od.fetchedAt });
-      if (cacheU && cachePct != null && cacheReset > now) c.push({ pct: cachePct, reset: cacheReset, at: cacheU.at });
-      c.sort((a, b) => b.at - a.at);
-      return c[0] || null;
-    };
-    const s5 = freshest(od.data && od.data.five_hour, cacheU && cacheU.u5h, cacheU && cacheU.reset5h);
-    const s7 = freshest(od.data && od.data.seven_day, cacheU && cacheU.u7d, cacheU && cacheU.reset7d);
-    const offPrem = od.premium && od.premium.reset > now ? od.premium : null;
+    const plan = readPlanUsage(process.env);
+    // Un relevé est valable si sa fenêtre court encore, ou s'il est très récent
+    // (les échantillons de l'app n'embarquent pas l'heure de reset).
+    const FRESH = 10 * 60 * 1000;
+    const collect = (pct, reset, at) => (pct != null && at && ((reset && reset > now) || now - at < FRESH))
+      ? [{ pct, reset: reset || 0, at }] : [];
+    const best = (arr) => arr.sort((a, b) => b.at - a.at)[0] || null;
+    const api5 = od.data && od.data.five_hour, api7 = od.data && od.data.seven_day;
+    const s5 = best([
+      ...collect(api5 && api5.pct, api5 && api5.reset, od.fetchedAt),
+      ...collect(cacheU && cacheU.u5h, cacheU && cacheU.reset5h, cacheU && cacheU.at),
+      ...collect(plan && plan.u5h, 0, plan && plan.at),
+    ]);
+    const s7 = best([
+      ...collect(api7 && api7.pct, api7 && api7.reset, od.fetchedAt),
+      ...collect(cacheU && cacheU.u7d, cacheU && cacheU.reset7d, cacheU && cacheU.at),
+      ...collect(plan && plan.u7d, 0, plan && plan.at),
+    ]);
+    // heure de reset : la meilleure connue, même si le pourcentage vient d'ailleurs
+    const knownReset = (...v) => v.find((x) => x && x > now) || 0;
+    const reset5 = knownReset(s5 && s5.reset, api5 && api5.reset, cacheU && cacheU.reset5h);
+    const reset7 = knownReset(s7 && s7.reset, api7 && api7.reset, cacheU && cacheU.reset7d);
+
+    // Fable : seule l'API expose ce compteur. Si l'hebdo a bougé depuis le dernier
+    // relevé Fable, on l'ajuste dans la même proportion (marqué ≈).
+    let offPrem = od.premium && od.premium.reset > now ? { ...od.premium } : null;
+    let premEstimated = false;
+    if (offPrem && s7 && api7 && api7.pct > 0 && s7.at > od.fetchedAt + 60000) {
+      const ratio = s7.pct / api7.pct;
+      if (isFinite(ratio) && ratio > 1 && ratio < 3) {
+        offPrem.pct = Math.min(1, offPrem.pct * ratio);
+        premEstimated = true;
+      }
+    }
     const off = {
-      u5h: s5 ? s5.pct : null, reset5h: s5 ? s5.reset : 0,
-      u7d: s7 ? s7.pct : null, reset7d: s7 ? s7.reset : 0,
-      at: Math.max(s5 ? s5.at : 0, s7 ? s7.at : 0, offPrem ? od.fetchedAt : 0),
+      u5h: s5 ? s5.pct : null, reset5h: reset5,
+      u7d: s7 ? s7.pct : null, reset7d: reset7,
+      at: Math.max(s5 ? s5.at : 0, s7 ? s7.at : 0),
     };
     const off5 = off.u5h != null;
     const off7 = off.u7d != null;
@@ -538,7 +620,7 @@ class DataStore {
     const estBlockTok = active ? active.sum.i + active.sum.o + active.sum.cw + active.sum.cr : 0;
     if (off5) {
       push('session', 'SESSION 5h', estBlockVal, estBlockCost, estBlockTok, null,
-        off.reset5h > now ? (off.reset5h - now) / 1000 : null, null, { pct: off.u5h * 100 });
+        reset5 ? (reset5 - now) / 1000 : null, null, { pct: off.u5h * 100 });
     } else {
       push('session', 'SESSION 5h', estBlockVal, estBlockCost, estBlockTok,
         lim('session', maxBlock, estBlockCost),
@@ -547,7 +629,7 @@ class DataStore {
     const weekTok = week.i + week.o + week.cw + week.cr;
     if (off7) {
       push('week', 'WEEK', week.val, week.cost, weekTok, null,
-        off.reset7d > now ? (off.reset7d - now) / 1000 : null, null, { pct: off.u7d * 100 });
+        reset7 ? (reset7 - now) / 1000 : null, null, { pct: off.u7d * 100 });
     } else {
       push('week', 'WEEK', week.val, week.cost, weekTok,
         lim('week', maxWeek, week.cost),
@@ -556,8 +638,12 @@ class DataStore {
     const premTok = premium.i + premium.o + premium.cw + premium.cr;
     if (offPrem) {
       // bucket officiel weekly_scoped (Fable/Opus) — la vraie valeur de /usage
-      push('premium', premiumFam.toUpperCase() + ' 7d', premium.val, premium.cost, premTok, null,
-        (offPrem.reset - now) / 1000, null, { pct: offPrem.pct * 100 });
+      meters.push({
+        key: 'premium', label: premiumFam.toUpperCase() + ' 7d',
+        used: premium.val, tokens: premTok, limit: null, auto: premEstimated,
+        official: !premEstimated, pct: offPrem.pct * 100,
+        resetSec: (offPrem.reset - now) / 1000, resetText: null,
+      });
     } else if (off7 && roll.tot > 0) {
       // Formule cccat, TOUJOURS, avec SES entrées exactes : part de tokens premium
       // sur fenêtre GLISSANTE 7 j × hebdo officiel ÷ plafond premium (~50 %).
@@ -608,4 +694,4 @@ class DataStore {
   }
 }
 
-module.exports = { DataStore, familyOf, entryCost, entryMetric };
+module.exports = { DataStore, familyOf, entryCost, entryMetric, readOAuthCreds };

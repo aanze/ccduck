@@ -80,9 +80,18 @@ typiquement `%APPDATA%\npm` sous Windows) est dans le `PATH`, puis rouvrir le te
 
 ## D'où viennent les chiffres ?
 
-**Aucune connexion à faire, aucune clé à fournir** — trois sources, dans cet ordre :
+**Aucune connexion à faire, aucune clé à fournir.** ccduck retient, fenêtre par fenêtre,
+**le relevé le plus frais** parmi les sources ci-dessous — jamais un mélange :
 
-1. **Endpoint officiel `/usage`** (`•`, source de vérité) :
+0. **Relevé de l'app Claude** (`•`, socle) : `%APPDATA%/Claude/plan-usage-history.json`
+   (macOS : `~/Library/Application Support/Claude/`). L'app y écrit son propre relevé
+   **toutes les 5 min** — `fh` = session 5 h, `sd` = hebdo, en pourcentage. Aucun token,
+   aucun appel réseau : **ni 401 ni 429 possibles**. C'est ce qui garantit des chiffres
+   justes en permanence, même token expiré.
+
+Puis, quand c'est disponible et plus récent :
+
+1. **Endpoint officiel `/usage`** (`•`, temps réel + compteur Fable) :
    `api.anthropic.com/api/oauth/usage`, authentifié avec le token OAuth **déjà présent**
    sur le poste (`~/.claude/.credentials.json`, ou le Trousseau sur macOS). C'est
    littéralement ce qu'affiche l'écran `/usage` de Claude Code — **les trois jauges,
@@ -90,7 +99,11 @@ typiquement `%APPDATA%\npm` sous Windows) est dans le `PATH`, puis rouvrir le te
    marteler l'endpoint), dernière valeur persistée dans `~/.ccduck-usage.json` pour les
    relances, backoff respecté sur 429, `r` force un rafraîchissement immédiat. Le token
    n'est jamais loggé ni envoyé ailleurs que chez Anthropic ; `ccduck --debug-usage`
-   affiche la réponse brute.
+   affiche la date d'expiration du token et la réponse brute. **Le `refreshToken` n'est
+   jamais utilisé** : chez Anthropic il tourne à chaque usage, s'en servir déconnecterait
+   ton Claude Code. Quand le token expire (~8 h), ccduck surveille le fichier de
+   credentials et repart dans les secondes qui suivent son renouvellement par Claude Code ;
+   entre-temps les jauges restent justes grâce à la source 0.
 2. **Cache local de Claude Code** : `~/.claude/vscode-claude-status-cache.json` — utilisé
    par fenêtre **uniquement s'il est plus récent** que la dernière réponse API. Attention :
    ce fichier n'est alimenté que quand l'extension VS Code tourne ; sur les autres postes
