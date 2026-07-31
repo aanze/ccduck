@@ -27,6 +27,18 @@ function readOAuthToken(env) {
       if (o && typeof o.accessToken === 'string' && o.accessToken) return o.accessToken;
     } catch (e) { /* absent : on retombera sur cache/estimation */ }
   }
+  // macOS : Claude Code range le token dans le Trousseau, pas dans un fichier
+  if (process.platform === 'darwin') {
+    try {
+      const out = require('child_process').execSync(
+        'security find-generic-password -s "Claude Code-credentials" -w',
+        { stdio: ['ignore', 'pipe', 'ignore'], timeout: 3000 }
+      ).toString().trim();
+      const j = JSON.parse(out);
+      const o = j.claudeAiOauth || j;
+      if (o && typeof o.accessToken === 'string' && o.accessToken) return o.accessToken;
+    } catch (e) { /* trousseau vide/refusé */ }
+  }
   return null;
 }
 
@@ -172,7 +184,9 @@ class DataStore {
       o.lastErr = null;
       saveOfficialState(o);
     } catch (e) {
-      o.lastErr = e && e.name === 'AbortError' ? 'timeout' : 'offline';
+      const code = String((e && (e.code || (e.cause && e.cause.code))) || '');
+      if (/CERT|SSL|TLS|UNABLE_TO_VERIFY|SELF_SIGNED/i.test(code)) o.lastErr = 'tls (proxy? see README)';
+      else o.lastErr = e && e.name === 'AbortError' ? 'timeout' : 'offline';
       o.nextTryAt = now + 5 * 60 * 1000; // réseau/proxy : on retentera, repli en attendant
       saveOfficialState(o);
     } finally {
