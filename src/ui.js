@@ -252,9 +252,11 @@ function draw(scr, state) {
   // âge de la donnée OFFICIELLE (pas du rescan des transcripts) : c'est elle que
   // portent les jauges, donc c'est sa fraîcheur qui doit être affichée
   const usageAge = snap.officialAt ? Math.round((Date.now() - snap.officialAt) / 1000) : null;
-  const right = fmtClock(new Date()) + (usageAge != null ? ' · usage ' + fmtDur(usageAge) : '');
+  const failing = !!snap.officialErr;
+  const right = fmtClock(new Date())
+    + (usageAge != null ? ' · usage ' + fmtDur(usageAge) + (failing ? ' ⚠' : '') : '');
   const stale = usageAge != null && usageAge > 300;
-  scr.text(cols - right.length - 1, y, right, stale ? C.orange : C.faint);
+  scr.text(cols - right.length - 1, y, right, failing ? C.red : stale ? C.orange : C.faint);
   y++;
   scr.hline(y++, 0, cols - 1, '─', C.faint);
 

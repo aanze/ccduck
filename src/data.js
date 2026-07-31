@@ -6,6 +6,8 @@
 const fs = require('fs');
 const path = require('path');
 const os = require('os');
+const https = require('https');
+const tls = require('tls');
 const { PRICING, claudeProjectDirs } = require('./config');
 
 const H5 = 5 * 3600 * 1000;
@@ -59,12 +61,76 @@ function loadOfficialState() {
   } catch (e) { return base; }
 }
 
+// Adopte les compteurs du disque s'ils sont plus frais que ceux en mémoire :
+// plusieurs ccduck peuvent tourner en parallèle, et une instance en échec ne doit
+// JAMAIS réécrire ses vieux chiffres par-dessus ceux qu'une autre vient d'obtenir.
+function adoptDiskIfNewer(o) {
+  try {
+    const d = JSON.parse(fs.readFileSync(officialStatePath(), 'utf8'));
+    if ((d.fetchedAt || 0) > (o.fetchedAt || 0)) {
+      o.data = d.data || null;
+      o.premium = d.premium || null;
+      o.fetchedAt = d.fetchedAt || 0;
+      return true;
+    }
+  } catch (e) { /* pas d'état sur disque */ }
+  return false;
+}
+
 function saveOfficialState(o) {
   try {
+    adoptDiskIfNewer(o); // garde-fou anti-régression
     fs.writeFileSync(officialStatePath(), JSON.stringify({
       data: o.data, premium: o.premium, fetchedAt: o.fetchedAt, nextTryAt: o.nextTryAt, lastErr: o.lastErr,
     }));
   } catch (e) { /* disque plein/verrouillé : tant pis, on garde l'état mémoire */ }
+}
+
+// Connexion neuve à chaque appel (pas de pool) : dans un process qui tourne des
+// heures, une socket TLS gardée en vie et coupée par un proxy/pare-feu fait
+// échouer tous les appels suivants. On ajoute aussi les CA du magasin système
+// (proxy d'entreprise qui ré-signe le trafic) sans jamais désactiver la vérification.
+let usageAgent = null;
+function getAgent() {
+  if (usageAgent) return usageAgent;
+  const opts = { keepAlive: false };
+  try {
+    if (typeof tls.getCACertificates === 'function') {
+      const sys = tls.getCACertificates('system') || [];
+      if (sys.length) opts.ca = [...(tls.getCACertificates('default') || []), ...sys];
+    }
+  } catch (e) { /* Node sans cette API : CA par défaut */ }
+  usageAgent = new https.Agent(opts);
+  return usageAgent;
+}
+
+function fetchUsage(token, userAgent, timeoutMs) {
+  return new Promise((resolve, reject) => {
+    const req = https.request({
+      host: 'api.anthropic.com',
+      path: '/api/oauth/usage',
+      method: 'GET',
+      agent: getAgent(),
+      headers: {
+        'Authorization': 'Bearer ' + token,
+        'anthropic-beta': 'oauth-2025-04-20',
+        'Content-Type': 'application/json',
+        'Accept': 'application/json',
+        'User-Agent': userAgent,
+        'Connection': 'close',
+      },
+    }, (res) => {
+      let body = '';
+      res.setEncoding('utf8');
+      res.on('data', (d) => { body += d; });
+      res.on('end', () => resolve({ status: res.statusCode, headers: res.headers, body }));
+    });
+    req.setTimeout(timeoutMs, () => {
+      req.destroy(Object.assign(new Error('timeout'), { code: 'ETIMEDOUT' }));
+    });
+    req.on('error', reject);
+    req.end();
+  });
 }
 
 // Repli : cache local écrit par l'extension VS Code / la statusline (parfois périmé).
@@ -130,6 +196,8 @@ class DataStore {
     const o = this.official;
     const now = Date.now();
     if (o.inFlight) return;
+    // une autre instance a peut-être déjà rafraîchi : en profiter avant de décider
+    adoptDiskIfNewer(o);
     if (!force) {
       if (now < o.nextTryAt) return;
       const consuming = this.lastEntryTs > o.fetchedAt;
@@ -139,22 +207,11 @@ class DataStore {
     if (!token) { o.lastErr = 'no token'; o.nextTryAt = now + 10 * 60 * 1000; saveOfficialState(o); return; }
     o.inFlight = true;
     try {
-      const ctrl = new AbortController();
-      const timer = setTimeout(() => ctrl.abort(), 15000); // réseau d'entreprise : large
-      const res = await fetch('https://api.anthropic.com/api/oauth/usage', {
-        headers: {
-          'Authorization': 'Bearer ' + token,
-          'anthropic-beta': 'oauth-2025-04-20',
-          'Content-Type': 'application/json',
-          'User-Agent': 'claude-code/' + (this.ccVersion || '2.1.219'),
-        },
-        signal: ctrl.signal,
-      });
-      clearTimeout(timer);
+      const res = await fetchUsage(token, 'claude-code/' + (this.ccVersion || '2.1.219'), 15000);
       if (res.status === 429) {
         // retry-after imposé par le serveur (secondes ou date HTTP) — le respecter
         // scrupuleusement : les 429 de cet endpoint s'aggravent si on insiste.
-        const raw = res.headers.get('retry-after') || '';
+        const raw = res.headers['retry-after'] || '';
         let ra = Number(raw) * 1000;
         if (!isFinite(ra) || ra <= 0) ra = (Date.parse(raw) || 0) - now;
         o.lastErr = 'rate-limited';
@@ -163,14 +220,14 @@ class DataStore {
         saveOfficialState(o);
         return;
       }
-      if (!res.ok) {
+      if (res.status < 200 || res.status >= 300) {
         o.lastErr = 'http ' + res.status;
         o.fails = (o.fails || 0) + 1;
         o.nextTryAt = now + (res.status === 401 ? 10 * 60 * 1000 : Math.min(20000 * 2 ** (o.fails - 1), 300000));
         saveOfficialState(o);
         return;
       }
-      const j = await res.json();
+      const j = JSON.parse(res.body);
       const win = (v) => (v && typeof v.utilization === 'number')
         ? { pct: v.utilization / 100, reset: Date.parse(v.resets_at) || 0 } : null;
       // Source de vérité : le tableau `limits` (c'est lui que l'écran /usage affiche).
@@ -203,9 +260,9 @@ class DataStore {
     } catch (e) {
       // Diagnostic honnête : on garde le code réel plutôt que de deviner.
       const code = String((e && (e.code || (e.cause && e.cause.code))) || '');
-      if (e && e.name === 'AbortError') o.lastErr = 'timeout';
-      else if (/CERT|SELF_SIGNED|UNABLE_TO_VERIFY/i.test(code)) o.lastErr = 'tls (proxy? see README)';
-      else o.lastErr = 'net' + (code ? ' ' + code.toLowerCase() : '');
+      if (code === 'ETIMEDOUT' || (e && e.name === 'AbortError')) o.lastErr = 'timeout';
+      else if (/CERT|SELF_SIGNED|UNABLE_TO_VERIFY/i.test(code)) o.lastErr = 'tls ' + code.toLowerCase();
+      else o.lastErr = 'net ' + (code || (e && e.message) || 'unknown').toString().toLowerCase().slice(0, 24);
       o.fails = (o.fails || 0) + 1;
       // retente vite : un raté réseau ne doit pas figer les chiffres
       o.nextTryAt = now + Math.min(20000 * 2 ** (o.fails - 1), 300000);
