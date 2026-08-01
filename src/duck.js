@@ -597,10 +597,12 @@ class Duck {
     } else if (name === 'drift') { a.x = this.x + rand(-6, 6); a.speed = 1.2; a.until = t + rand(3, 7); }
     else if (name === 'dabble' || name === 'preen') {
       a.until = t + (name === 'dabble' ? rand(1.6, 3) : rand(1.8, 3.2));
-      // the cat neither dabbles nor preens: both stand for one grooming session,
-      // which runs far longer than the duck's quick dip and drives its own frames
+      // the cat neither dabbles nor preens: each name stands for one leg of its
+      // grooming — the hindquarters or a front paw — and the session decides on
+      // its own whether to carry on to the other. Either way it runs far longer
+      // than the duck's quick dip, and drives its own frames.
       if (this.pet === 'cat' && !this.feeding) {
-        this.groom = groomPlan(t);
+        this.groom = groomPlan(t, name === 'preen' ? 'lick' : 'wash');
         a.until = this.groom.until;
         a.speed = 0;                      // it stays put for the whole routine
       }

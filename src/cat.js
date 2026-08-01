@@ -216,8 +216,8 @@ const SPR_CAT = {
     '..MMMmMM........',
     '..MMMKMMM.......',
     '...MMMT.........',
-    '..MMMKMM..mm.mm.',
-    '..MMMM.....mm.m.',
+    '..MMMKMM..mm....',
+    '..MMMM.....mm...',
     '.MMMMMM....KmK..',
     '.MMMMMmM....mm..',
     '.M.MMmMMM..mm...',
@@ -523,7 +523,7 @@ const SPR_CAT = {
     'MMMM........MMMM',
     'MMMMMMMMMMMMMMMM',
     'MMMMMMMMMMMMMMMM',
-    'MMWKKMMMMMMKKKMM',
+    'MMWKKMMMMMMWKKMM',
     'MMKKKMMMMMMKKKMM',
     'MMMMMMMPPMMMMMMM',
     'MMMMMMKKKKMMMMMM',
@@ -596,12 +596,17 @@ const SPR_CAT = {
 const CYCLES = {
   walk: [['walk1', 0.30], ['walk2', 0.14], ['walk3', 0.32], ['walk4', 0.14]],
   wash: [['wash1', 0.55], ['wash2', 0.35], ['wash3', 0.45], ['wash2', 0.22], ['wash3', 0.40]],
-  lick: [['lick1', 0.45], ['lick2', 0.30], ['lick3', 0.32], ['lick2', 0.24]],
+  // five beats like wash, not four: at equal pass counts a shorter cycle made
+  // the front paw visibly the poor relation of the hindquarters
+  lick: [['lick1', 0.50], ['lick2', 0.34], ['lick3', 0.38], ['lick2', 0.26], ['lick3', 0.42]],
   eat: [['eat1', 0.26], ['eat2', 0.20]],
   meow: [['sit', 0.45], ['sitUp', 0.40], ['sitMeow', 0.40], ['sitUp', 0.25], ['sitMeow', 0.40], ['sitUp', 0.55]],
-  // the mid-groom pause: it holds the sitting pose and looks up, blinking
-  gaze: [['sit', 1.05], ['sitBlink', 0.13], ['sit', 0.62], ['sitBlink', 0.11],
-    ['sit', 1.25], ['sitBlink', 0.14], ['sit', 0.80]],
+  // The mid-groom pause: it holds the sitting pose and looks up, blinking. The
+  // blinks last a third of a second, not the tenth a real one would: the panel
+  // redraws 10 times a second, so anything shorter shows for a single frame and
+  // reads as a glitch. A cat's slow blink is the right length anyway.
+  gaze: [['sit', 1.00], ['sitBlink', 0.30], ['sit', 0.55], ['sitBlink', 0.28],
+    ['sit', 1.10], ['sitBlink', 0.34], ['sit', 0.75]],
 };
 const cycleLen = (n) => CYCLES[n].reduce((s, [, d]) => s + d, 0);
 
@@ -614,23 +619,51 @@ function cycleFrame(name, t) {
   return cyc[0][0];
 }
 
-// One grooming session. A cat does not wash itself for two seconds: it settles
-// down, works the hindquarters for several cycles, stops to look up at whoever
-// is watching — same posture, just the head turned, blinking — and only then
-// starts on a front paw. The shape of the routine is a drawing concern, so it
-// lives here; the behaviour code only asks when the whole thing ends.
-function groomPlan(t, rnd) {
+// A grooming session is one or two legs: the hindquarters ('wash') and a front
+// paw ('lick'). Either can happen on its own — a cat that sits down to lick a
+// paw does not owe you the rest of the routine — and about two sessions in five
+// carry on to the other leg, with the pause in between: same posture, head
+// turned to whoever is watching, blinking.
+//
+// Two or three passes of a leg, either way round — the two cycles are the same
+// length now, so the count means the same thing on both sides. Now and then it
+// really settles into one and goes on for up to ten, which is the difference
+// between a cat tidying itself up and a cat with a job to do. Each leg rolls its
+// own length, so a long one can follow a short one.
+const GROOM_LEGS = { wash: [2, 3], lick: [2, 3] };
+const GROOM_LONG = [4, 10];
+const GROOM_LONG_P = 0.22;
+const GROOM_CHAIN = 0.8;         // how often a session does both legs
+function groomPlan(t, first, rnd) {
   const r = rnd || Math.random;
-  const wash = t + cycleLen('wash') * (3 + Math.floor(r() * 3));
-  const pause = wash + 2.4 + r() * 1.6;
-  return { t0: t, washUntil: wash, pauseUntil: pause, until: pause + cycleLen('lick') * (3 + Math.floor(r() * 3)) };
+  const lead = GROOM_LEGS[first] ? first : 'wash';
+  const legs = r() < GROOM_CHAIN ? [lead, lead === 'wash' ? 'lick' : 'wash'] : [lead];
+  const phases = [];
+  let at = t;
+  legs.forEach((leg, i) => {
+    // exactly one pass of the gaze cycle, so all three blinks always play out —
+    // a random pause length would cut the last one off half the time
+    if (i) { at += cycleLen('gaze'); phases.push({ cycle: 'gaze', until: at }); }
+    const [lo, hi] = r() < GROOM_LONG_P ? GROOM_LONG : GROOM_LEGS[leg];
+    at += cycleLen(leg) * (lo + Math.floor(r() * (hi - lo + 1)));
+    phases.push({ cycle: leg, until: at });
+  });
+  // A one-leg session often ends on that same pause rather than opening on the
+  // next leg — it has finished, and now it is looking at you. Without this the
+  // blinking would only ever show on the sessions that do both legs, which is
+  // too rare to notice.
+  if (legs.length === 1 && r() < 0.5) { at += cycleLen('gaze'); phases.push({ cycle: 'gaze', until: at }); }
+  return { t0: t, phases, until: at };
 }
-// Each leg restarts its cycle from its first frame, so a session always opens on
-// wash1 and the pause always opens on an open eye.
+// Each phase restarts its cycle from its own first frame, so a leg always opens
+// on wash1 or lick1 and the pause always opens on an open eye.
 function groomFrame(g, t) {
-  if (t < g.washUntil) return cycleFrame('wash', t - g.t0);
-  if (t < g.pauseUntil) return cycleFrame('gaze', t - g.washUntil);
-  return cycleFrame('lick', t - g.pauseUntil);
+  let from = g.t0;
+  for (const p of g.phases) {
+    if (t < p.until) return cycleFrame(p.cycle, t - from);
+    from = p.until;
+  }
+  return cycleFrame(g.phases[g.phases.length - 1].cycle, t - from);
 }
 
 const TOWER_W = 10;

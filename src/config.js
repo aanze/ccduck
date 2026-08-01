@@ -18,8 +18,14 @@ const DEFAULTS = {
   historyDays: 35,           // how much history is parsed (auto-limit calibration)
   refreshSec: 10,
   fps: 10,
-  alert: 70,                 // alert threshold (%)
-  panic: 90,                 // panic threshold (%)
+  alert: 70,                 // alert threshold (%) — the 5-hour SESSION block
+  panic: 90,                 // panic threshold (%) — idem
+  // The weekly gauges (WEEK, and the premium family) fill over seven days, so
+  // the same percentage means something far less urgent there: 80 % of a week
+  // with days left to run is not 80 % of a block that resets within hours.
+  // Above these, WEEK behaves exactly as the session does.
+  weeklyAlert: 85,
+  weeklyPanic: 96,
   premiumFamily: 'auto',     // 'auto' | 'fable' | 'opus'
   premiumShare: 0.5,         // share of the weekly envelope for the premium model (estimation formula)
   planUsageDir: null,        // folder holding plan-usage-history.json (when %APPDATA%\Claude is unreachable)

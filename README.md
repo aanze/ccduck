@@ -13,9 +13,13 @@ if you prefer — `cccat`.
 - **The mascot** lives its own life: it swims with a wake, drifts, dabbles head-down,
   preens its feathers, sleeps (naps up to 1 min when everything is below 30 %, 30 s
   otherwise) and only ever speaks in onomatopoeia (“quack”, “zzz…”) — only limit warnings
-  get actual words. As soon as a gauge crosses **70 %**, it swims under that gauge's tip
-  and points at it with its wing; at **90 %** it's full **panic** — in 20-30 s bursts,
-  broken up by a lap around the pond punctuated with “quack”, then it starts over.
+  get actual words. As soon as the SESSION gauge crosses **70 %**, it swims under that
+  gauge's tip and points at it with its wing; at **90 %** it's full **panic** — in 20-30 s
+  bursts, broken up by a lap around the pond punctuated with “quack”, then it starts over.
+  **The weekly gauges are held to their own, higher thresholds** (**85 %** and **96 %**,
+  `weeklyAlert` / `weeklyPanic`): a week fills over seven days, so 80 % of it is not the
+  news 80 % of a five-hour block is — and below panic they only get **short pointing
+  bursts with long breaks** instead of monopolising the animal.
   **Several gauges above the threshold are handled in turn**, one per pointing burst, and
   a `▲` marker sits over each of them. One exception: the premium gauge (FABLE/OPUS) only
   ever triggers a **soft alert**, never panic — the other models stay usable — and at
@@ -74,7 +78,7 @@ A ready-to-use npm package sits in [`dist/`](dist/) (and is attached to GitHub R
 Download the `.tgz`, then:
 
 ```bash
-npm install -g ./ccduck-2.0.0.tgz
+npm install -g ./ccduck-2.0.1.tgz
 ```
 
 (Frozen copy: to update, reinstall the next version's `.tgz`.)
@@ -252,6 +256,8 @@ Optional file, to be created in your home folder. Everything in it is optional:
   "fps": 10,
   "alert": 70,
   "panic": 90,
+  "weeklyAlert": 85,
+  "weeklyPanic": 96,
   "planLabel": "Max 20x",
   "premiumFamily": "auto",
   "weeklyReset": { "weekday": 3, "hour": 9 },

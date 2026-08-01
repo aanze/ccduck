@@ -31,9 +31,17 @@ function pctColor(pct, cfg) {
   return C.green;
 }
 
-function levelOf(worstPct, cfg) {
-  if (worstPct >= cfg.panic) return 'panic';
-  if (worstPct >= cfg.alert) return 'alert';
+// WEEK and the premium family fill over seven days; the session block resets
+// within hours. The same percentage is not the same news, so they get their own,
+// higher thresholds. Called without a key (the exported helper), it answers for
+// the session — the strictest reading.
+const WEEKLY = new Set(['week', 'premium']);
+function levelOf(worstPct, cfg, key) {
+  const weekly = WEEKLY.has(key);
+  const panic = weekly && cfg.weeklyPanic != null ? cfg.weeklyPanic : cfg.panic;
+  const alert = weekly && cfg.weeklyAlert != null ? cfg.weeklyAlert : cfg.alert;
+  if (worstPct >= panic) return 'panic';
+  if (worstPct >= alert) return 'alert';
   if (worstPct < 30) return 'zen';
   return 'calm';
 }
@@ -61,7 +69,7 @@ function metersGeometry(snap, cols, cfg) {
     const pct = Math.max(0, m.pct == null ? 0 : m.pct);
     const fill = Math.min(1, pct / 100) * L.barW;
     const tip = L.barX0 + Math.max(0, Math.min(L.barW - 1, Math.floor(fill)));
-    let eff = levelOf(pct, cfg);
+    let eff = levelOf(pct, cfg, m.key);
     if (m.key === 'premium' && eff === 'panic') eff = 'alert';
     const e = { pct, tip, label: m.label, idx, eff, key: m.key };
     if (RANK[eff] >= RANK.alert) alerts.push(e);
@@ -79,7 +87,11 @@ function metersGeometry(snap, cols, cfg) {
   return {
     L, tips, worst, alerts,
     level: worst ? worst.eff : 'calm',
-    soft: !!(worst && worst.key === 'premium'),
+    // A weekly gauge short of its panic threshold points in short bursts with
+    // long breaks, rather than monopolising the animal: there are days left to
+    // do something about it. Premium was already softened this way, and stays
+    // so at every level since its panic is capped to alert above.
+    soft: !!(worst && WEEKLY.has(worst.key) && worst.eff !== 'panic'),
   };
 }
 
