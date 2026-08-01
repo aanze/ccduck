@@ -58,7 +58,7 @@ Un paquet npm prêt à l'emploi est fourni dans [`dist/`](dist/) (et attaché au
 Releases GitHub). Télécharger le `.tgz` puis :
 
 ```bash
-npm install -g ./ccduck-1.12.0.tgz
+npm install -g ./ccduck-1.12.1.tgz
 ```
 
 (Copie figée : pour mettre à jour, réinstaller le `.tgz` de la version suivante.)
@@ -120,9 +120,13 @@ Puis, quand c'est disponible et plus récent :
 3. **Estimation locale** (`≈`) : lecture des transcripts (`~/.claude/projects/**/*.jsonl`),
    déduplication, agrégation par modèle — source des coûts, débits, projections et du
    tableau (infos que `/usage` ne donne pas), et repli des jauges si aucune donnée
-   officielle n'est disponible. Pour Fable sans bucket officiel, formule
-   [cccat](https://github.com/Glance-mediametrie/cccat) : part de tokens fable sur 7 j
-   glissants × hebdo officiel ÷ `premiumShare` (~50 % de l'enveloppe).
+   officielle n'est disponible. Pour Fable, deux replis : si un relevé officiel du bucket
+   existe mais a vieilli (API muette, token expiré), on repart de sa dernière valeur et on
+   la fait bouger **comme l'hebdo globale**, qui, elle, reste rafraîchie par la source 0 —
+   et seulement si les transcripts montrent de la conso premium depuis ce relevé, pour
+   qu'un passage sur un autre modèle ne fasse pas grimper la jauge. Sans aucun relevé du
+   bucket, formule [cccat](https://github.com/Glance-mediametrie/cccat) : part de tokens
+   fable sur 7 j glissants × hebdo officiel ÷ `premiumShare` (~50 % de l'enveloppe).
 
 L'âge de la donnée officielle est affiché en pied de page dès qu'elle dépasse 5 minutes.
 

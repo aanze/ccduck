@@ -760,19 +760,30 @@ class DataStore {
     const estBlockTok = active ? active.sum.i + active.sum.o + active.sum.cw + active.sum.cr : 0;
     const ex5 = extrapolate(s5, 'fh'), ex7 = extrapolate(s7, 'sd');
 
-    // Coût premium sur la fenêtre de 7 j glissants finissant à `t`.
-    const premCostAt = (t) => {
+    // Coût premium consommé entre deux instants (transcripts locaux).
+    const premCostBetween = (t0, t1) => {
       let c = 0;
-      for (const e of es) if (e.fam === premiumFam && e.ts > t - D7 && e.ts <= t) c += e.cost;
+      for (const e of es) if (e.fam === premiumFam && e.ts > t0 && e.ts <= t1) c += e.cost;
       return c;
     };
-    // Quota premium déduit du dernier relevé officiel du bucket, puis appliqué à
-    // la conso premium d'aujourd'hui. Valable tant que la fenêtre hebdo n'a pas
-    // tourné (le relevé peut être ancien : c'est le quota qu'on en tire, pas la valeur).
+    // API muette depuis un moment (token périmé, réseau) : on repart du DERNIER
+    // pourcentage officiel du bucket et on le fait bouger comme l'hebdo globale,
+    // qui, elle, continue d'être rafraîchie par le fichier de l'app. On ne le
+    // bouge que si les transcripts montrent de la conso premium depuis ce relevé :
+    // passer sur un autre modèle ne doit pas faire monter la jauge premium.
+    //
+    // L'ancienne règle de trois — pourcentage officiel × (coût premium sur 7 j
+    // glissants maintenant / au moment du relevé) — explosait : sa base n'a rien
+    // à voir avec le quota (fenêtre glissante contre fenêtre à reset fixe, et
+    // les transcripts ne voient que CE poste). Mesuré ici : 85 % × 1,3 = 100 %
+    // affiché pour 86 % réels, alors que l'hebdo n'avait bougé que de 68 à 69 %.
     let anchorPrem = null;
     if (!offPrem && od.premium && od.premium.reset > now && od.premium.pct > 0 && od.fetchedAt > 0) {
-      const cAt = premCostAt(od.fetchedAt), cNow = premCostAt(now);
-      if (cAt > 0) anchorPrem = Math.min(100, od.premium.pct * 100 * (cNow / cAt));
+      anchorPrem = od.premium.pct * 100;
+      const ratio = (s7 && api7 && api7.pct > 0 && s7.at > od.fetchedAt) ? s7.pct / api7.pct : 1;
+      if (premCostBetween(od.fetchedAt, now) > 0 && isFinite(ratio) && ratio > 1 && ratio < 3) {
+        anchorPrem = Math.min(100, anchorPrem * ratio);
+      }
     }
     if (off5) {
       push('session', 'SESSION 5h', estBlockVal, estBlockCost, estBlockTok, null,
