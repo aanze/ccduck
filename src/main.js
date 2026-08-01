@@ -23,10 +23,12 @@ Usage: ccduck [options]
   --update         update ccduck now (git pull, or reinstall from the repo)
   --auto-reauth    renew the expired OAuth token instead of waiting for Claude Code
   --cat, --duck    which animal, for this run only (cccat = ccduck --cat)
+  --no-alerts      the animal ignores the gauges: no pointing, no panic
   --help, --version
 
 Keys  : [q] quit  [f] feed  [s] sleeping pill (5 min)  [r] refresh  [m] metric  [c] table  [d] demo  [p] pause
         [x] swap duck and cat for this session
+        [z] alerts off: it stops watching the gauges entirely, and just lives
         [u] install the update when one is offered in the header
         [a] toggle auto-reauth (off by default: ccduck only reads the token file)
 Config: ~/.ccduck.json (limits, thresholds, weekly reset… see README)
@@ -53,6 +55,7 @@ function parseArgs(argv) {
     else if (a === '--debug-usage') o.debugUsage = true;
     else if (a === '--update') o.update = true;
     else if (a === '--auto-reauth') o.autoReauth = true;
+    else if (a === '--no-alerts') o.alerts = false;
     // which animal, for this run only: what the `cccat` launcher passes
     else if (a === '--cat') o.pet = 'cat';
     else if (a === '--duck') o.pet = 'duck';
@@ -88,6 +91,7 @@ async function run(argv) {
   const cfg = load(opts.config);
   if (opts.autoReauth) cfg.autoReauth = true;
   if (opts.pet) cfg.pet = opts.pet;        // --cat / --duck win over the config file
+  if (opts.alerts === false) cfg.alerts = false;
   let metric = METRICS.includes(opts.metric) ? opts.metric : (METRICS.includes(cfg.metric) ? cfg.metric : 'cost');
   const mode = colorMode(process.env, opts.noColor ? '256' : null);
   const isTTY = !!process.stdout.isTTY;
@@ -294,6 +298,14 @@ async function run(argv) {
         cfg.autoReauth = !cfg.autoReauth;
         store.reauthBlockedUntil = 0;
         if (cfg.autoReauth) pokeOfficial(true);
+      }
+      else if (k === 'z' || k === 'Z') {
+        // the animal stops watching the gauges altogether: no pointing, no
+        // panic, no markers, everything else as usual. Session only: to make it
+        // permanent, set "alerts": false in ~/.ccduck.json
+        cfg.alerts = cfg.alerts === false;
+        duck.phase = null;                 // drop a pointing burst in progress
+        refreshSnap();
       }
       else if (k === 'u' || k === 'U') {
         // hand the terminal back before running git/npm: their output has to

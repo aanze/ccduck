@@ -84,6 +84,15 @@ function metersGeometry(snap, cols, cfg) {
   });
   // most severe first: that is the order the duck handles them in
   alerts.sort((a, b) => (RANK[b.eff] - RANK[a.eff]) || (b.pct - a.pct));
+  // Alerts switched off: it simply never notices. Its mood is capped at calm —
+  // zen still applies when everything really is green, since being relaxed
+  // about low usage is not the same thing as reacting to a threshold — and with
+  // no worst gauge there is nothing to point at and no marker to draw. Every
+  // other behaviour is untouched, and the gauges are still read and coloured.
+  if (cfg.alerts === false) {
+    const quiet = worst && RANK[worst.eff] <= RANK.calm ? worst.eff : 'calm';
+    return { L, tips, worst: null, alerts: [], level: quiet, soft: false };
+  }
   return {
     L, tips, worst, alerts,
     level: worst ? worst.eff : 'calm',
@@ -279,10 +288,13 @@ function drawRain(scr, top, rowsN, waterY, strength, t) {
 }
 
 function drawWater(scr, y, t, duckX, pet) {
-  // the cat lives on dry land: a plain floor instead of the pond
+  // The cat lives on dry land: a plain floor instead of the pond. The glyph is
+  // top-aligned (▔, not ▁) because the paws end at the bottom of the row above:
+  // a bottom-aligned floor left a whole empty cell under them, and the cat — and
+  // its tower, which stands on the same line — read as floating one row up.
   if (pet === 'cat') {
     for (let x = 0; x < scr.cols; x++) {
-      scr.set(x, y, '▁', (x % 7 === 3) ? 0x7A8B5A : 0x565B63, null, A_DIM);
+      scr.set(x, y, '▔', (x % 7 === 3) ? 0x7A8B5A : 0x565B63, null, A_DIM);
     }
     return;
   }
@@ -487,6 +499,7 @@ function draw(scr, state) {
   } else {
     const keys = '[q]uit [f]eed [s]edate [r]efresh [m]etric:' + ui.metricLabel + ' [c]table [d]emo'
       + ' [x]pet:' + (state.duckInfo.pet === 'cat' ? 'cat' : 'duck')
+      + ' [z]alerts:' + (cfg.alerts === false ? 'off' : 'on')
       + ' [a]uth:' + (cfg.autoReauth ? 'auto' : 'off') + (ui.paused ? ' ▮▮' : '');
     const bits = [];
     // the source actually kept: app (local Claude file), api, or VS Code cache

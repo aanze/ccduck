@@ -415,6 +415,9 @@ const RAID_EVERY = [40, 80];   // and it comes back regularly while still hungry
 const RAID_LEN = [4, 7];
 const RAID_UP = 0.18, RAID_HOLD = 0.12, RAID_DOWN = 0.3;   // spring, impact, fall back
 const CAT_LEAP = 0.42;   // how long the cat spends in the air on a pounce
+// The hop onto the tower. 0.28 s is three frames at ten a second — the leap
+// drawing barely registered before the cat was already curled up on top.
+const TOWER_LEAP = 0.45;
 const RAID_FLAP = ['raidFlapUp', 'raidFlapMid', 'raidFlapDown', 'raidFlapMid'];
 const CAT_RAID_FLAP = ['raidFlapUp', 'raidLow'];
 // The zoomies: every few minutes the cat decides something is there, and hunts
@@ -613,7 +616,12 @@ class Duck {
       this.maybePurr();
     }
     // real naps: up to 1 min when everything is green, 30 s otherwise
-    else if (name === 'sleep') { a.until = t + (mode === 'zen' ? rand(6, 60) : rand(3.5, 30)); this.maybePurr(); }
+    else if (name === 'sleep') {
+      // a cat naps longer than a duck, on top of napping more often
+      const nap = mode === 'zen' ? rand(6, 60) : rand(3.5, 30);
+      a.until = t + (this.pet === 'cat' ? nap * 1.35 : nap);
+      this.maybePurr();
+    }
     else if (name === 'quack') {
       a.until = t + 0.8;
       // including during alert/panic laps: the occasional quack
@@ -680,7 +688,7 @@ class Duck {
         if (!this.tower) this.tower = { phase: 'up', t0: t };          // leap!
         if (this.tower.phase === 'up') {
           this.frame = 'leap';
-          if (t - this.tower.t0 >= 0.28) this.tower = { phase: 'on', t0: t };
+          if (t - this.tower.t0 >= TOWER_LEAP) this.tower = { phase: 'on', t0: t };
           else return;
         }
       }
@@ -1399,7 +1407,7 @@ class Duck {
     let towerLift = 0;
     if (this.tower) {
       const e = this.t - this.tower.t0;
-      if (this.tower.phase === 'up') towerLift = Math.min(1, e / 0.28);
+      if (this.tower.phase === 'up') towerLift = Math.min(1, e / TOWER_LEAP);
       else if (this.tower.phase === 'on') towerLift = 1;
       else towerLift = Math.max(0, 1 - e / 0.3);
     }

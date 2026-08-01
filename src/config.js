@@ -26,6 +26,10 @@ const DEFAULTS = {
   // Above these, WEEK behaves exactly as the session does.
   weeklyAlert: 85,
   weeklyPanic: 96,
+  // false = the animal ignores the thresholds outright: no pointing, no panic,
+  // no markers. Everything else it does carries on unchanged, and the gauges are
+  // still read and coloured the same. The `z` key toggles it for the session.
+  alerts: true,
   premiumFamily: 'auto',     // 'auto' | 'fable' | 'opus'
   premiumShare: 0.5,         // share of the weekly envelope for the premium model (estimation formula)
   planUsageDir: null,        // folder holding plan-usage-history.json (when %APPDATA%\Claude is unreachable)

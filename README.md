@@ -20,6 +20,10 @@ if you prefer — `cccat`.
   `weeklyAlert` / `weeklyPanic`): a week fills over seven days, so 80 % of it is not the
   news 80 % of a five-hour block is — and below panic they only get **short pointing
   bursts with long breaks** instead of monopolising the animal.
+  **Not in the mood to be watched? `z` switches the alerts off altogether** (or
+  `--no-alerts`, or `"alerts": false` in the config): it stops looking at the gauges
+  entirely — no pointing, no panic, no markers — and just gets on with its life. Every
+  other behaviour carries on, and the gauges are still read and coloured the same.
   **Several gauges above the threshold are handled in turn**, one per pointing burst, and
   a `▲` marker sits over each of them. One exception: the premium gauge (FABLE/OPUS) only
   ever triggers a **soft alert**, never panic — the other models stay usable — and at
@@ -45,8 +49,9 @@ if you prefer — `cccat`.
   splashing everywhere — 10 s at most, repeatable while the rain lasts but never twice in
   a row without a 30 s break.
 - **Or a cat** (`cccat`, or the `x` key): the same engine frame for frame, different
-  drawings and a few habits of its own. It saunters instead of paddling, naps twice as
-  much and on a **cat tower**, grooms itself in full sessions (several cycles on the
+  drawings and a few habits of its own. It saunters instead of paddling, naps twice as often
+  as the duck and half again as long, and does it curled up on a **cat tower** it
+  reaches with a wiggle and a leap, grooms itself in full sessions (several cycles on the
   hindquarters, a pause spent staring at you and blinking, then a front paw), purrs,
   meows, and every 2 to 5 minutes gets **the zoomies**: it stalks, wiggles its rear and
   pounces — in an arc, four beats — on something that is not there. When a shower would
@@ -78,7 +83,7 @@ A ready-to-use npm package sits in [`dist/`](dist/) (and is attached to GitHub R
 Download the `.tgz`, then:
 
 ```bash
-npm install -g ./ccduck-2.0.4.tgz
+npm install -g ./ccduck-2.1.0.tgz
 ```
 
 (Frozen copy: to update, reinstall the next version's `.tgz`.)
