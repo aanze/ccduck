@@ -144,9 +144,15 @@ function drawMeter(scr, y, m, L, cfg, blinkOn, isWorst, bites, t) {
 let snapMetric = 'cost'; // unité courante pour fmtMetric (évite de la passer partout)
 
 // Compose les pixels du canard + particules dans les cellules [top .. top+rowsN-1].
-function drawCanvas(scr, top, rowsN, duckInfo, t) {
+// `lift` = nombre de lignes AU-DESSUS du bassin que le canard a le droit
+// d'occuper (il ne s'en sert que pour aller cogner une barre). Le tampon de
+// pixels est agrandi d'autant vers le haut ; la ligne d'eau, elle, ne bouge pas.
+function drawCanvas(scr, top, rowsN, duckInfo, t, lift) {
   const W = scr.cols;
-  const H = rowsN * 2;
+  const extra = Math.max(0, lift || 0);
+  const rowsTotal = rowsN + extra;
+  const yTop = top - extra;
+  const H = rowsTotal * 2;
   const px = new Int32Array(W * H).fill(-1);
   const baseY = H - SPR_H;
   const { rows, mirror, x, yOff } = duckInfo;
@@ -187,24 +193,24 @@ function drawCanvas(scr, top, rowsN, duckInfo, t) {
       px[pxY * W + pxX] = col;
     }
   }
-  for (let ry = 0; ry < rowsN; ry++) {
+  for (let ry = 0; ry < rowsTotal; ry++) {
     for (let cx = 0; cx < W; cx++) {
       const topC = px[(ry * 2) * W + cx];
       const botC = px[(ry * 2 + 1) * W + cx];
       if (topC < 0 && botC < 0) continue;
       if (topC >= 0 && botC >= 0) {
-        if (topC === botC) scr.set(cx, top + ry, '█', topC);
-        else scr.set(cx, top + ry, '▀', topC, botC);
-      } else if (topC >= 0) scr.set(cx, top + ry, '▀', topC);
-      else scr.set(cx, top + ry, '▄', botC);
+        if (topC === botC) scr.set(cx, yTop + ry, '█', topC);
+        else scr.set(cx, yTop + ry, '▀', topC, botC);
+      } else if (topC >= 0) scr.set(cx, yTop + ry, '▀', topC);
+      else scr.set(cx, yTop + ry, '▄', botC);
     }
   }
   // particules par-dessus (rel:false = ancrées à l'eau, pas au canard qui oscille)
   for (const p of duckInfo.particles) {
     const pxY = baseY + (p.rel === false ? 0 : yOff) + p.y;
-    const cy = top + Math.floor(pxY / 2);
+    const cy = yTop + Math.floor(pxY / 2);
     const cx = Math.round(p.x);
-    if (cy >= top && cy < top + rowsN && cx >= 0 && cx < W) scr.set(cx, cy, p.ch, p.fg);
+    if (cy >= yTop && cy < top + rowsN && cx >= 0 && cx < W) scr.set(cx, cy, p.ch, p.fg);
   }
 }
 
@@ -353,7 +359,19 @@ function draw(scr, state) {
     }
   }
   drawBubble(scr, bubbleY, state.duckInfo, state.bubble, blinkOn);
-  drawCanvas(scr, canvasTop, canvasRows, state.duckInfo, tSec);
+  // Pillage : il sort de l'eau pour aller cogner la barre. On agrandit la zone
+  // de dessin vers le haut juste de ce qu'il faut, et on le remonte à
+  // proportion de `reach` — à 1, son bec tombe pile sur la ligne de la jauge.
+  const peck = state.duckInfo.peck;
+  let duckInfo = state.duckInfo, lift = 0;
+  if (peck && peck.reach > 0) {
+    // au repos, le haut du sprite (12 px = 6 lignes) est sur cette ligne-là :
+    // c'est la distance entre elle et la barre qu'il doit franchir
+    const headRow = canvasTop + canvasRows - 6;
+    lift = Math.max(0, headRow - (metersTop + peck.m));
+    duckInfo = { ...duckInfo, yOff: duckInfo.yOff - Math.round(peck.reach * lift * 2) };
+  }
+  drawCanvas(scr, canvasTop, canvasRows, duckInfo, tSec, lift);
   const waterY = canvasTop + canvasRows;
   drawWater(scr, waterY, tSec, state.duckInfo.x);
   drawRain(scr, canvasTop, canvasRows, waterY, state.duckInfo.rain || 0, tSec);

@@ -125,6 +125,68 @@ const SPR = {
     '..yyYYYYYYYyy...',
     '...yyyyyyyyy....',
   ]),
+  // pillage des barres, vu de DOS : il se ramasse, puis se détend ailes déployées
+  // et va cogner la jauge avec son bec. Le bec est en haut du sprite (lignes 1-2,
+  // colonnes 7-8) : c'est ce point-là que l'interface amène sur la barre.
+  raidLow: F([
+    '................',
+    '.......OO.......',
+    '......oOOo......',
+    '.....yYYYYy.....',
+    '.....YYYYYY.....',
+    '....yYYYYYYy....',
+    '...yYYYYYYYYy...',
+    '..yYYYYYYYYYYy..',
+    '..yYYYYYYYYYYy..',
+    '...yYYYYYYYYy...',
+    '.....yYYYYy.....',
+    '......yYYy......',
+  ]),
+  // trois positions d'ailes, jouées en boucle rapide : il bat des ailes comme un
+  // poussin qui ne sait pas voler. Bec toujours lignes 1-2 : le point de contact
+  // avec la barre ne doit pas bouger d'une image à l'autre.
+  raidFlapUp: F([
+    '................',
+    '.......OO.......',
+    '......oOOo......',
+    '.....yYYYYy.....',
+    'yYY..YYYYYY..YYy',
+    '.yY.yYYYYYYy.Yy.',
+    '..yYYYYYYYYYYy..',
+    '...yYYYYYYYYy...',
+    '....yYYYYYYy....',
+    '.....yYYYYy.....',
+    '......yYYy......',
+    '.......yy.......',
+  ]),
+  raidFlapMid: F([
+    '................',
+    '.......OO.......',
+    '......oOOo......',
+    '.....yYYYYy.....',
+    '.....YYYYYY.....',
+    'yYYYYYYYYYYYYYYy',
+    '..yYYYYYYYYYYy..',
+    '...yYYYYYYYYy...',
+    '....yYYYYYYy....',
+    '.....yYYYYy.....',
+    '......yYYy......',
+    '.......yy.......',
+  ]),
+  raidFlapDown: F([
+    '................',
+    '.......OO.......',
+    '......oOOo......',
+    '.....yYYYYy.....',
+    '.....YYYYYY.....',
+    '...yyYYYYYYyy...',
+    '.yYYYYYYYYYYYYy.',
+    'yYy.yYYYYYYy.yYy',
+    '....yYYYYYYy....',
+    '.....yYYYYy.....',
+    '......yYYy......',
+    '.......yy.......',
+  ]),
   // réclamation : grosse tête plein cadre, collée à l'écran, bec qui claque
   begA: F([
     '.....HHHHHH.....',
@@ -316,7 +378,8 @@ const POSED = new Set(['dabble', 'preen', 'sleep', 'gaze']);
 // Même idée côté image : tant qu'il tient une de ces poses (ou qu'il panique),
 // on ne lui superpose pas la pose de la crotte.
 const POSE_FRAMES = new Set(['dabble', 'preen', 'sleep', 'front', 'frontBlink', 'frontQuack',
-  'panicA', 'panicB', 'poopA', 'poopB', 'begA', 'begB', 'billUp']);
+  'panicA', 'panicB', 'poopA', 'poopB', 'begA', 'begB', 'billUp',
+  'raidLow', 'raidFlapUp', 'raidFlapMid', 'raidFlapDown']);
 
 // Météo : une averse de temps en temps, rare et longue. Elle ne change rien aux
 // chiffres, seulement l'ambiance — et l'humeur du canard.
@@ -340,6 +403,8 @@ const BEG_STEPS = [[60, 120], [35, 70], [22, 45]];
 const STARVING = 3;            // palier à partir duquel il s'attaque aux barres
 const RAID_EVERY = [40, 80];   // et il y revient régulièrement tant qu'il a faim
 const RAID_LEN = [4, 7];
+const RAID_UP = 0.18, RAID_HOLD = 0.12, RAID_DOWN = 0.3;   // détente, impact, retombée
+const RAID_FLAP = ['raidFlapUp', 'raidFlapMid', 'raidFlapDown', 'raidFlapMid'];
 const BITE_REGEN = 240;        // une barre grignotée met 4 min à se refermer
 // Bulle imagée : des graines et un point d'interrogation, pas de phrase — le
 // texte reste réservé aux avertissements de limites.
@@ -383,6 +448,7 @@ class Duck {
     this.raid = null;           // {m, until, nextBite, x0, tip, aim} — pillage d'une jauge
     this.nextRaidAt = 0;
     this.bites = [];            // {m, i, born} — trous laissés dans les barres (effet gruyère)
+    this.peck = null;           // {m, x, strike} — coup de bec en cours, prolongé par l'interface
     this.rain = null;           // {since, until} — averse en cours
     this.nextRainAt = rand(RAIN_EVERY[0], RAIN_EVERY[1]);
     this.joy = null;            // {lookUntil, endAt, nextTurn, wx} — session de joie sous la pluie
@@ -750,12 +816,14 @@ class Duck {
     if (!cand.length) return;
     const c = pick(cand);
     this.nextRaidAt = t + rand(RAID_EVERY[0], RAID_EVERY[1]);
-    this.raid = { m: c.m, until: t + rand(RAID_LEN[0], RAID_LEN[1]), nextBite: 0, x0: bars.x0, tip: c.tip, aim: null };
+    this.raid = { m: c.m, until: t + rand(RAID_LEN[0], RAID_LEN[1]), nextBite: 0, x0: bars.x0, tip: c.tip,
+      aim: null, jumpAt: null, bitten: false };
     // ses propres miettes ne doivent pas l'interrompre en plein pillage : il
     // les mangera juste après. Une poignée de graines lancée à la main, elle,
     // remet ce délai à zéro et le fait décrocher immédiatement.
     this.feedCooldownUntil = Math.max(this.feedCooldownUntil, this.raid.until);
     this.act = null;
+    this.bubble = null;   // le cou tendu traverse la ligne de bulle : on la libère
   }
 
   // Pillage : il se place sous la barre, saute comme un damné, et à chaque
@@ -763,25 +831,54 @@ class Duck {
   // et flotte jusqu'à ce qu'il la picore.
   runRaid(dt, minX, maxX) {
     const t = this.t, r = this.raid;
-    if (t > r.until) { this.raid = null; return; }
-    if (t > r.nextBite) {
-      r.nextBite = t + rand(0.45, 0.85);
-      const i = Math.floor(rand(0, Math.max(1, r.tip - r.x0)));
-      this.bites.push({ m: r.m, i, born: t });
-      while (this.bites.length > 80) this.bites.shift();
-      r.aim = r.x0 + i;
-      this.hop = 3.4;                       // le bond qui arrache le morceau
-      // la miette : elle tombe de la barre et finit en graine sur l'eau
-      this.seeds.push({ x: Math.max(1, Math.min(this.canvasW - 2, r.aim)), y: -rand(7, 11), vy: rand(4, 7), landed: false, crumb: true });
-      while (this.seeds.length > 28) this.seeds.shift();
-      if (Math.random() < 0.35) this.say(pick(['QUACK !', 'miam !', '∵ !']), 'alert', 1.2);
+    if (t > r.until) { this.raid = null; this.peck = null; return; }
+    if (r.aim == null) r.aim = r.x0 + Math.floor(rand(0, Math.max(1, r.tip - r.x0)));
+    // De dos : le bec est au milieu du sprite (colonne 7), on cale ce point-là
+    // sous la colonne visée. `reach` (0 → 1) dit à l'interface de combien le
+    // sortir de l'eau : à 1 le bec touche la barre.
+    const beakX = () => this.x + 7;
+    this.dir = -1;                                  // sprite symétrique, pas de miroir
+    if (r.jumpAt == null) {
+      // au repos : il se replace sous sa cible, puis se ramasse et détend
+      this.moveToward(r.aim - 7, 22, dt, minX, maxX);
+      if (Math.abs(beakX() - r.aim) < 1.2 && t > r.nextBite) r.jumpAt = t;
     }
-    this.moveToward((r.aim != null ? r.aim : r.x0) - SPR_W / 2, 22, dt, minX, maxX);
-    this.frame = (Math.floor(t / 0.16) % 2 === 0) ? 'quack' : 'stand';
-    if (Math.random() < dt * 10) this.spawn({
-      x: this.x + rand(2, SPR_W - 2), y: SPR_H - 1,
-      vx: rand(-3, 3), vy: -rand(2, 5), ch: pick(['∘', '·']), fg: WATER, life: rand(0.3, 0.6), rel: false,
-    });
+    let reach = 0;
+    if (r.jumpAt != null) {
+      const e = t - r.jumpAt;
+      if (e < RAID_UP) reach = e / RAID_UP;                       // la détente
+      else if (e < RAID_UP + RAID_HOLD) {                          // l'impact
+        reach = 1;
+        if (!r.bitten) {
+          r.bitten = true;
+          const col = Math.round(beakX());
+          this.bites.push({ m: r.m, i: Math.max(0, Math.min(r.tip - r.x0, col - r.x0)), born: t });
+          while (this.bites.length > 80) this.bites.shift();
+          // la miette arrachée : elle tombe et finit en graine sur l'eau
+          this.seeds.push({ x: Math.max(1, Math.min(this.canvasW - 2, col)), y: -rand(7, 11), vy: rand(4, 7), landed: false, crumb: true });
+          while (this.seeds.length > 28) this.seeds.shift();
+          for (let i = 0; i < 3; i++) this.spawn({
+            x: col + rand(-1.5, 1.5), y: 0,
+            vx: rand(-4, 4), vy: -rand(1, 3), ch: pick(['·', '˙']), fg: SEED, life: rand(0.25, 0.6), rel: false,
+          });
+        }
+      } else if (e < RAID_UP + RAID_HOLD + RAID_DOWN) {            // la retombée
+        reach = 1 - (e - RAID_UP - RAID_HOLD) / RAID_DOWN;
+      } else {
+        // amerrissage : éclaboussures, puis il vise ailleurs
+        for (let i = 0; i < 4; i++) this.spawn({
+          x: this.x + rand(3, SPR_W - 3), y: SPR_H - 1,
+          vx: rand(-4, 4), vy: -rand(2, 5), ch: pick(['∘', '·']), fg: WATER, life: rand(0.3, 0.7), rel: false,
+        });
+        r.jumpAt = null; r.bitten = false;
+        r.nextBite = t + rand(0.25, 0.6);
+        r.aim = r.x0 + Math.floor(rand(0, Math.max(1, r.tip - r.x0)));
+      }
+    }
+    // dès qu'il quitte l'eau, il bat des ailes à toute vitesse — trois positions
+    // enchaînées toutes les 70 ms, ça donne le battement paniqué d'un poussin
+    this.frame = reach > 0.12 ? RAID_FLAP[Math.floor(t / 0.07) % RAID_FLAP.length] : 'raidLow';
+    this.peck = { m: r.m, x: Math.round(beakX()), reach };
   }
 
   // Retourne true si le canard est occupé à manger (prioritaire sur tout).
@@ -977,7 +1074,8 @@ class Duck {
     }
     yOff -= Math.round(this.hop);
     return { rows, mirror, x: Math.round(this.x), yOff, particles: this.particles, seeds: this.seeds,
-      pills: this.pills, poops: this.poops, t: this.t, rain: this.rainStrength(), bites: this.bites };
+      pills: this.pills, poops: this.poops, t: this.t, rain: this.rainStrength(),
+      bites: this.bites, peck: this.raid ? this.peck : null };
   }
 }
 
