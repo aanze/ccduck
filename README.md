@@ -26,8 +26,13 @@ jaune en pixel art qui vit sa vie sur l'eau… et panique quand tes limites appr
   l'eau une minute avant de disparaître. Sans repas depuis **10 minutes**, elle vient
   réclamer : elle traverse le bassin, colle sa grosse tête plein cadre et quacke à
   s'en décrocher le bec, bulle imagée à l'appui, et elle repasse toutes les 1 à 2 min
-  jusqu'à ce qu'on cède. Deux poses marquées ne s'enchaînent jamais d'une image à
-  l'autre : elle se redresse toujours entre les deux.
+  jusqu'à ce qu'on cède. Si on ne cède pas, **elle revient de plus en plus souvent**
+  (toutes les 35-70 s, puis 22-45 s), et au bout de **30 minutes** elle ne demande plus :
+  elle saute sur les **barres de progression**, en arrache des miettes qu'elle va picorer
+  sur l'eau, et laisse les jauges **en gruyère**. Les trous se referment très lentement,
+  en quatre stades sur 4 minutes — et une miette n'étant pas un repas, elle y revient
+  tant que personne ne la nourrit pour de bon. Deux poses marquées ne s'enchaînent jamais
+  d'une image à l'autre : elle se redresse toujours entre les deux.
 - **La météo** s'invite : toutes les 7 à 25 min, une **averse** de 30 s à 5 min traverse
   le bassin (gouttes devant le canard, éclaboussures sur l'eau). Au bout de quelques
   secondes elle lève le bec vers le ciel, regarde à gauche puis à droite, et se met à
@@ -58,7 +63,7 @@ Un paquet npm prêt à l'emploi est fourni dans [`dist/`](dist/) (et attaché au
 Releases GitHub). Télécharger le `.tgz` puis :
 
 ```bash
-npm install -g ./ccduck-1.13.0.tgz
+npm install -g ./ccduck-1.14.0.tgz
 ```
 
 (Copie figée : pour mettre à jour, réinstaller le `.tgz` de la version suivante.)

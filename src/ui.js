@@ -3,7 +3,7 @@
 // débit, tableau par modèle, pied de page. Conçu pour un panneau étroit (>= 56 col).
 
 const { A_BOLD, A_REV, A_DIM } = require('./ansi');
-const { SPR_W, SPR_H, PAL, SEED, PILL_A, PILL_B, POOP, POOP_TOP, POOP_OLD, POOP_LIFE, CURRENT } = require('./duck');
+const { SPR_W, SPR_H, PAL, SEED, PILL_A, PILL_B, POOP, POOP_TOP, POOP_OLD, POOP_LIFE, CURRENT, BITE_REGEN } = require('./duck');
 const { fmtMetric, fmtTok, fmtDur, fmtClock, fmtPct, clip, padR, padL, fmtCost } = require('./format');
 
 const C = {
@@ -73,7 +73,17 @@ function metersGeometry(snap, cols, cfg) {
   };
 }
 
-function drawMeter(scr, y, m, L, cfg, blinkOn, isWorst) {
+// Morsure dans une barre : d'abord un trou franc, puis un remplissage très
+// progressif (░ ▒ ▓) — le gruyère doit rester visible longtemps.
+function biteChar(age) {
+  const k = age / BITE_REGEN;
+  if (k < 0.3) return null;
+  if (k < 0.55) return '░';
+  if (k < 0.8) return '▒';
+  return '▓';
+}
+
+function drawMeter(scr, y, m, L, cfg, blinkOn, isWorst, bites, t) {
   const lbl = L.labelW <= 5 ? clip(m.label, 4) : m.label;
   // pct null = on ne sait pas : barre vide et « — », surtout pas un chiffre inventé
   if (m.pct == null) {
@@ -101,7 +111,14 @@ function drawMeter(scr, y, m, L, cfg, blinkOn, isWorst) {
   const frac = Math.round((fill - full) * 8);
   for (let i = 0; i < L.barW; i++) {
     const x = L.barX0 + i;
-    if (i < full) scr.set(x, y, '█', color);
+    const born = bites && bites.get(i);
+    if (i < full && born !== undefined) {
+      // le canard est passé par là
+      const ch = biteChar((t || 0) - born);
+      if (ch === null) scr.set(x, y, '·', C.barEmpty);
+      else scr.set(x, y, ch, color, null, A_DIM);
+    }
+    else if (i < full) scr.set(x, y, '█', color);
     else if (i === full && frac > 0) scr.set(x, y, PARTIALS[Math.min(6, frac - 1)], color);
     else scr.set(x, y, '·', C.barEmpty);
   }
@@ -307,8 +324,19 @@ function draw(scr, state) {
   scr.hline(y++, 0, cols - 1, '─', C.faint);
 
   // ---- jauges ----
+  // trous laissés par le canard affamé : colonne -> date de la morsure, la plus
+  // récente gagne (remordre au même endroit rouvre le trou)
+  const metersTop = y;
+  const biteMap = new Map();
+  for (const b of (state.duckInfo.bites || [])) {
+    let mm = biteMap.get(b.m);
+    if (!mm) { mm = new Map(); biteMap.set(b.m, mm); }
+    const prev = mm.get(b.i);
+    if (prev === undefined || b.born > prev) mm.set(b.i, b.born);
+  }
   for (let i = 0; i < snap.meters.length; i++) {
-    drawMeter(scr, y, snap.meters[i], geo.L, cfg, blinkOn, geo.worst && geo.worst.idx === i);
+    drawMeter(scr, y, snap.meters[i], geo.L, cfg, blinkOn, geo.worst && geo.worst.idx === i,
+      biteMap.get(i), state.duckInfo.t);
     y++;
   }
 
@@ -329,6 +357,17 @@ function draw(scr, state) {
   const waterY = canvasTop + canvasRows;
   drawWater(scr, waterY, tSec, state.duckInfo.x);
   drawRain(scr, canvasTop, canvasRows, waterY, state.duckInfo.rain || 0, tSec);
+  // miettes arrachées aux barres : elles tombent de la jauge jusqu'au bassin,
+  // où la physique des graines prend le relais (et où il les picore)
+  const FALL = 0.7;
+  for (const b of (state.duckInfo.bites || [])) {
+    const age = (state.duckInfo.t || 0) - b.born;
+    if (age < 0 || age > FALL) continue;
+    const fromY = metersTop + b.m;
+    const cy = Math.round(fromY + (age / FALL) * (canvasTop - fromY));
+    const cx = geo.L.barX0 + b.i;
+    if (cy > fromY && cy < canvasTop && cx >= 0 && cx < cols) scr.set(cx, cy, '·', SEED);
+  }
   y = waterY + 1;
   scr.hline(y++, 0, cols - 1, '─', C.faint);
 

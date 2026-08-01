@@ -334,7 +334,13 @@ const JOYS = ['♥', 'quack quack !', '♥ ♥'];
 // c'est justement parce qu'il ne trouve rien qu'il vient nous voir.
 // CCDUCK_HUNGRY_SEC raccourcit le délai (mise au point du rendu).
 const HUNGRY_AFTER = Number(process.env.CCDUCK_HUNGRY_SEC) || 600;
-const BEG_EVERY = [60, 120];
+// La faim monte par paliers d'un HUNGRY_AFTER : il revient réclamer de plus en
+// plus souvent, et au troisième palier il ne demande plus, il se sert.
+const BEG_STEPS = [[60, 120], [35, 70], [22, 45]];
+const STARVING = 3;            // palier à partir duquel il s'attaque aux barres
+const RAID_EVERY = [40, 80];   // et il y revient régulièrement tant qu'il a faim
+const RAID_LEN = [4, 7];
+const BITE_REGEN = 240;        // une barre grignotée met 4 min à se refermer
 // Bulle imagée : des graines et un point d'interrogation, pas de phrase — le
 // texte reste réservé aux avertissements de limites.
 const BEGS = ['∵ ?', 'QUACK ! ∵', '∵ ∵ ∵ !!'];
@@ -374,6 +380,9 @@ class Duck {
     this.lastMealAt = 0;        // dernier vrai repas (graine/gélule) — jauge de faim
     this.nextBegAt = 0;
     this.beg = null;            // {phase:'come'|'face', until, comeUntil, nextQuack}
+    this.raid = null;           // {m, until, nextBite, x0, tip, aim} — pillage d'une jauge
+    this.nextRaidAt = 0;
+    this.bites = [];            // {m, i, born} — trous laissés dans les barres (effet gruyère)
     this.rain = null;           // {since, until} — averse en cours
     this.nextRainAt = rand(RAIN_EVERY[0], RAIN_EVERY[1]);
     this.joy = null;            // {lookUntil, endAt, nextTurn, wx} — session de joie sous la pluie
@@ -543,6 +552,8 @@ class Duck {
     // les crottes partent avec le courant — exactement à sa vitesse
     for (const p of this.poops) p.x -= CURRENT * dt;
     this.poops = this.poops.filter((p) => this.t - p.born < POOP_LIFE && p.x > -3);
+    // les barres grignotées se referment très lentement (cf. BITE_REGEN)
+    this.bites = this.bites.filter((b) => this.t - b.born < BITE_REGEN);
   }
 
   // Digestion : de temps en temps (et seulement s'il a mangé), un petit plop.
@@ -687,7 +698,9 @@ class Duck {
     const t = this.t;
     if (this.beg || this.feeding || t - this.lastMealAt < HUNGRY_AFTER) return;
     if (t < this.nextBegAt || POSE_FRAMES.has(this.frame)) return;
-    this.nextBegAt = t + rand(BEG_EVERY[0], BEG_EVERY[1]);
+    // plus la faim dure, plus il revient souvent
+    const step = BEG_STEPS[Math.min(BEG_STEPS.length - 1, this.hungerLevel() - 1)];
+    this.nextBegAt = t + rand(step[0], step[1]);
     this.beg = { phase: 'come', until: 0, comeUntil: t + 6, nextQuack: 0 };
     this.act = null;
   }
@@ -715,6 +728,59 @@ class Duck {
     for (let i = 0; i < 2; i++) this.spawn({
       x: this.x + rand(3, SPR_W - 3), y: SPR_H - 1,
       vx: rand(-3, 3), vy: -rand(2, 5), ch: pick(['∘', '·']), fg: WATER, life: rand(0.4, 0.8), rel: false,
+    });
+  }
+
+  // Niveau de faim, en paliers de HUNGRY_AFTER : 0 = repu, 1 = il réclame,
+  // 2 = il insiste, 3 et plus = il crève la dalle et se sert tout seul.
+  hungerLevel() {
+    return Math.max(0, Math.floor((this.t - this.lastMealAt) / HUNGRY_AFTER));
+  }
+
+  // Dernier stade de la faim : il s'en prend aux barres de progression.
+  // `bars` vient de l'interface : {x0, tips} — début des barres et pointe de
+  // remplissage de chacune. Sans ça (rendu hors TTY), pas de pillage.
+  maybeRaid(bars) {
+    const t = this.t;
+    if (this.raid || this.beg || this.feeding || this.hungerLevel() < STARVING) return;
+    if (t < this.nextRaidAt || POSE_FRAMES.has(this.frame)) return;
+    if (!bars || !Array.isArray(bars.tips)) return;
+    // il ne vise que les barres qui ont de quoi être grignotées
+    const cand = bars.tips.map((tip, m) => ({ m, tip })).filter((c) => c.tip > bars.x0 + 2);
+    if (!cand.length) return;
+    const c = pick(cand);
+    this.nextRaidAt = t + rand(RAID_EVERY[0], RAID_EVERY[1]);
+    this.raid = { m: c.m, until: t + rand(RAID_LEN[0], RAID_LEN[1]), nextBite: 0, x0: bars.x0, tip: c.tip, aim: null };
+    // ses propres miettes ne doivent pas l'interrompre en plein pillage : il
+    // les mangera juste après. Une poignée de graines lancée à la main, elle,
+    // remet ce délai à zéro et le fait décrocher immédiatement.
+    this.feedCooldownUntil = Math.max(this.feedCooldownUntil, this.raid.until);
+    this.act = null;
+  }
+
+  // Pillage : il se place sous la barre, saute comme un damné, et à chaque
+  // bond il arrache un morceau — un trou dans la barre, une miette qui tombe
+  // et flotte jusqu'à ce qu'il la picore.
+  runRaid(dt, minX, maxX) {
+    const t = this.t, r = this.raid;
+    if (t > r.until) { this.raid = null; return; }
+    if (t > r.nextBite) {
+      r.nextBite = t + rand(0.45, 0.85);
+      const i = Math.floor(rand(0, Math.max(1, r.tip - r.x0)));
+      this.bites.push({ m: r.m, i, born: t });
+      while (this.bites.length > 80) this.bites.shift();
+      r.aim = r.x0 + i;
+      this.hop = 3.4;                       // le bond qui arrache le morceau
+      // la miette : elle tombe de la barre et finit en graine sur l'eau
+      this.seeds.push({ x: Math.max(1, Math.min(this.canvasW - 2, r.aim)), y: -rand(7, 11), vy: rand(4, 7), landed: false, crumb: true });
+      while (this.seeds.length > 28) this.seeds.shift();
+      if (Math.random() < 0.35) this.say(pick(['QUACK !', 'miam !', '∵ !']), 'alert', 1.2);
+    }
+    this.moveToward((r.aim != null ? r.aim : r.x0) - SPR_W / 2, 22, dt, minX, maxX);
+    this.frame = (Math.floor(t / 0.16) % 2 === 0) ? 'quack' : 'stand';
+    if (Math.random() < dt * 10) this.spawn({
+      x: this.x + rand(2, SPR_W - 2), y: SPR_H - 1,
+      vx: rand(-3, 3), vy: -rand(2, 5), ch: pick(['∘', '·']), fg: WATER, life: rand(0.3, 0.6), rel: false,
     });
   }
 
@@ -761,7 +827,10 @@ class Duck {
           fg: best.pill ? pick([PILL_A, PILL_B]) : SEED, life: rand(0.3, 0.6), rel: false,
         });
         this.eaten = Math.min(6, this.eaten + 1);
-        this.lastMealAt = t;
+        // une miette arrachée à une barre n'est pas un repas : elle ne fait
+        // reculer la faim que d'un cran, sinon il se contenterait de piller les
+        // jauges et ne viendrait plus jamais réclamer
+        this.lastMealAt = best.it.crumb ? Math.min(t, this.lastMealAt + HUNGRY_AFTER * 0.4) : t;
         this.nextBegAt = 0;   // rassasié : le prochain créneau repartira de zéro
         if (this.nextPoopAt < t) this.nextPoopAt = t + rand(70, 165);
         if (best.pill) {
@@ -818,6 +887,7 @@ class Duck {
     this.maybePoop();
     this.maybeBeg();
     this.maybeJoy();
+    this.maybeRaid(ctx.bars);
 
     const target = Math.max(minX, Math.min(maxX, (ctx.targetX || ctx.canvasW / 2) - SPR_W / 2));
     const busy = ctx.mode === 'alert' || ctx.mode === 'panic';
@@ -829,6 +899,8 @@ class Duck {
       this.runBeg(dt, minX, maxX);
     } else if (this.joy) {
       this.runJoy(dt, minX, maxX);
+    } else if (this.raid) {
+      this.runRaid(dt, minX, maxX);
     } else if (busy) {
       // ---- cycle : pointer longuement la jauge, puis souffler, puis y retourner ----
       // ctx.soft (jauge premium) : phases de pointage plus courtes, pauses plus longues
@@ -905,8 +977,8 @@ class Duck {
     }
     yOff -= Math.round(this.hop);
     return { rows, mirror, x: Math.round(this.x), yOff, particles: this.particles, seeds: this.seeds,
-      pills: this.pills, poops: this.poops, t: this.t, rain: this.rainStrength() };
+      pills: this.pills, poops: this.poops, t: this.t, rain: this.rainStrength(), bites: this.bites };
   }
 }
 
-module.exports = { Duck, PAL, SPR_W, SPR_H, SEED, PILL_A, PILL_B, POOP, POOP_TOP, POOP_OLD, POOP_LIFE, CURRENT };
+module.exports = { Duck, PAL, SPR_W, SPR_H, SEED, PILL_A, PILL_B, POOP, POOP_TOP, POOP_OLD, POOP_LIFE, CURRENT, BITE_REGEN };

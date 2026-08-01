@@ -321,6 +321,8 @@ async function run(argv) {
       worstPct: geo.worst ? geo.worst.pct : 0,
       soft: geo.soft,
       canvasW: cols,
+      // géométrie des barres : ce qu'il lui faut pour aller les grignoter
+      bars: { x0: geo.L.barX0, tips: geo.tips },
     });
     ui.draw(screen, {
       snap: shown, cfg, tSec: duck.t, blinkOn: Math.floor(duck.t / 0.35) % 2 === 0,
