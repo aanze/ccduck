@@ -58,7 +58,7 @@ Un paquet npm prêt à l'emploi est fourni dans [`dist/`](dist/) (et attaché au
 Releases GitHub). Télécharger le `.tgz` puis :
 
 ```bash
-npm install -g ./ccduck-1.12.1.tgz
+npm install -g ./ccduck-1.13.0.tgz
 ```
 
 (Copie figée : pour mettre à jour, réinstaller le `.tgz` de la version suivante.)
@@ -108,11 +108,14 @@ Puis, quand c'est disponible et plus récent :
    marteler l'endpoint), dernière valeur persistée dans `~/.ccduck-usage.json` pour les
    relances, backoff respecté sur 429, `r` force un rafraîchissement immédiat. Le token
    n'est jamais loggé ni envoyé ailleurs que chez Anthropic ; `ccduck --debug-usage`
-   affiche la date d'expiration du token et la réponse brute. **Le `refreshToken` n'est
-   jamais utilisé** : chez Anthropic il tourne à chaque usage, s'en servir déconnecterait
-   ton Claude Code. Quand le token expire (~8 h), ccduck surveille le fichier de
-   credentials et repart dans les secondes qui suivent son renouvellement par Claude Code ;
-   entre-temps les jauges restent justes grâce à la source 0.
+   affiche la date d'expiration du token et la réponse brute. **Par défaut, le
+   `refreshToken` n'est jamais utilisé** : chez Anthropic il tourne à chaque usage, s'en
+   servir sans précaution déconnecterait ton Claude Code. Quand le token expire (~8 h),
+   ccduck surveille le fichier de credentials et repart dans les secondes qui suivent son
+   renouvellement par Claude Code ; entre-temps les jauges restent justes grâce à la
+   source 0, mais le bucket Fable passe en estimation `≈` et les heures de reset se
+   perdent. La touche `a` arme le mode [auto-reauth](#auto-reauth--touche-a), qui
+   renouvelle le token à ta place.
 2. **Cache local de Claude Code** : `~/.claude/vscode-claude-status-cache.json` — utilisé
    par fenêtre **uniquement s'il est plus récent** que la dernière réponse API. Attention :
    ce fichier n'est alimenté que quand l'extension VS Code tourne ; sur les autres postes
@@ -153,6 +156,7 @@ config. La métrique par défaut est le **coût équivalent API** (cache lu 0,1�
 | `d` | démo : 75 % → 93 % → balayage → off (pour voir le canard s'exciter) |
 | `p` / espace | pause |
 | `u` | installer la mise à jour quand l'en-tête en propose une |
+| `a` | auto-reauth : renouveler soi-même le token expiré, ou non (défaut : non) |
 
 ## Mises à jour
 
@@ -172,6 +176,36 @@ dans `~/.ccduck-update.json`. C'est le seul appel réseau de ccduck en dehors de
 l'endpoint d'usage d'Anthropic ; `"checkUpdates": false` dans la config le coupe
 entièrement. Un échec est silencieux : une panne réseau ne doit jamais gêner les jauges.
 
+## Auto-reauth — touche `a`
+
+Le token OAuth de Claude Code vit ~8 h. Passé ce délai, la source n°1 se tait : les jauges
+SESSION et WEEK restent justes grâce au fichier de l'app, mais **le bucket Fable bascule en
+estimation `≈` et les heures de reset disparaissent** — seule l'API les fournit.
+
+La touche `a` bascule à chaud entre les deux fonctionnements, et le pied de page affiche
+celui qui est actif :
+
+| Mode | Comportement |
+|---|---|
+| `auth:off` (défaut) | ccduck se contente de **lire** le fichier de credentials, et attend que Claude Code renouvelle le token |
+| `auth:auto` | ccduck renouvelle lui-même le token expiré — `POST /v1/oauth/token` sur `platform.claude.com`, `grant_type=refresh_token`, puis réécriture du fichier |
+
+Le mode `auto` **écrit** dans `~/.claude/.credentials.json`, qui appartient à Claude Code.
+Précautions : sauvegarde intégrale avant la première écriture
+(`.credentials.json.ccduck-backup`), **fusion et jamais remplacement** (`mcpOAuth` et
+`organizationUuid` restent intacts), écriture atomique, et abandon si le fichier a changé
+entre la lecture et l'écriture — un autre process a renouvelé de son côté, c'est le sien
+qui fait foi. Une tentative par minute au plus, et plus aucune si le refresh token est
+mort : dans ce cas seul `claude auth login` répare.
+
+**Le risque résiduel**, et la raison pour laquelle ce mode est désactivé par défaut :
+Anthropic fait tourner le refresh token à chaque usage. Si un `claude` tourne dans un
+terminal au même moment et renouvelle de son côté, le dernier qui écrit gagne — l'autre
+se retrouve avec un jeton mort et devra refaire `claude auth login`.
+
+Pour le rendre permanent : `"autoReauth": true` dans la config, ou `ccduck --auto-reauth`
+au lancement. La touche `a` ne vaut que pour la session en cours.
+
 ## Options
 
 ```
@@ -180,6 +214,7 @@ ccduck --demo[=95]     force les jauges (canard en panique garanti)
 ccduck --size 80x30    taille forcée
 ccduck --metric total  métrique au lancement
 ccduck --update        mettre à jour maintenant
+ccduck --auto-reauth   renouveler le token expiré au lieu d'attendre Claude Code
 ccduck --help
 ```
 
@@ -214,6 +249,7 @@ Fichier optionnel, à créer dans le dossier utilisateur. Tout est optionnel :
 | `weeklyReset` | jour/heure du reset hebdo (`weekday` : 0 = dimanche … 6 = samedi) — utile seulement si le cache officiel de Claude Code est absent ; sinon le reset officiel est utilisé automatiquement |
 | `limits.*` | en **dollars équivalent API**, ou `"auto"` (pic historique) — ne sert qu'aux jauges estimées `≈` |
 | `checkUpdates` | `true` par défaut : vérifie une fois par demi-journée s'il existe une version plus récente. `false` coupe tout appel à GitHub |
+| `autoReauth` | `false` par défaut : à `true`, ccduck renouvelle lui-même le token OAuth expiré (touche `a`, [détails](#auto-reauth--touche-a)) |
 
 ## Dépannage
 

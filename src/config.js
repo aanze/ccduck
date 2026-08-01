@@ -29,6 +29,7 @@ const DEFAULTS = {
   limits: { session: 'auto', day: 'auto', week: 'auto', premium: 'auto' },
   showTable: true,
   checkUpdates: true,        // vérifie une fois par demi-journée si une version plus récente existe
+  autoReauth: false,         // renouveler soi-même le token OAuth expiré (touche `a`) — voir src/auth.js
 };
 
 function configPath() {

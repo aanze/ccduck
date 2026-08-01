@@ -374,7 +374,8 @@ function draw(scr, state) {
   if (snap.lastError) {
     scr.text(1, fy, clip('⚠ ' + snap.lastError, cols - 2), C.red);
   } else {
-    const keys = '[q]uit [f]eed [s]edate [r]efresh [m]etric:' + ui.metricLabel + ' [c]table [d]emo' + (ui.paused ? ' ▮▮' : '');
+    const keys = '[q]uit [f]eed [s]edate [r]efresh [m]etric:' + ui.metricLabel + ' [c]table [d]emo'
+      + ' [a]uth:' + (cfg.autoReauth ? 'auto' : 'off') + (ui.paused ? ' ▮▮' : '');
     const bits = [];
     // source réellement retenue : app (fichier local de Claude), api, ou cache VS Code
     if (snap.officialUsed) bits.push('• src:' + (snap.officialSrc || '?'));

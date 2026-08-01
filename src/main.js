@@ -21,10 +21,12 @@ Usage: ccduck [options]
   --metric M       cost | total | billable
   --config PATH    config file (default: ~/.ccduck.json)
   --update         update ccduck now (git pull, or reinstall from the repo)
+  --auto-reauth    renew the expired OAuth token instead of waiting for Claude Code
   --help, --version
 
 Keys  : [q] quit  [f] feed the duck  [s] sleeping pill (5 min)  [r] refresh  [m] metric  [c] table  [d] demo  [p] pause
         [u] install the update when one is offered in the header
+        [a] toggle auto-reauth (off by default: ccduck only reads the token file)
 Config: ~/.ccduck.json (limits, thresholds, weekly reset… see README)`;
 
 function parseArgs(argv) {
@@ -43,6 +45,7 @@ function parseArgs(argv) {
     else if (a === '--no-color') o.noColor = true;
     else if (a === '--debug-usage') o.debugUsage = true;
     else if (a === '--update') o.update = true;
+    else if (a === '--auto-reauth') o.autoReauth = true;
     else if (a === '--mirror') o.mirror = true;
     else if (a === '--mirror-watch') { o.mirror = true; o.mirrorWatch = true; }
     else o._.push(a);
@@ -73,6 +76,7 @@ async function run(argv) {
   if (opts.update) { process.exit(update.runUpdate() ? 0 : 1); }
 
   const cfg = load(opts.config);
+  if (opts.autoReauth) cfg.autoReauth = true;
   let metric = METRICS.includes(opts.metric) ? opts.metric : (METRICS.includes(cfg.metric) ? cfg.metric : 'cost');
   const mode = colorMode(process.env, opts.noColor ? '256' : null);
   const isTTY = !!process.stdout.isTTY;
@@ -263,6 +267,14 @@ async function run(argv) {
       else if (k === 'f' || k === 'F') { duck.feed(); }
       else if (k === 's' || k === 'S') { duck.dropPill(); }
       else if (k === 'c' || k === 'C') { showTable = !showTable; }
+      else if (k === 'a' || k === 'A') {
+        // bascule entre « on attend que Claude Code renouvelle » (défaut) et
+        // « ccduck renouvelle lui-même le token expiré ». Session seulement :
+        // pour rendre ça permanent, "autoReauth": true dans ~/.ccduck.json
+        cfg.autoReauth = !cfg.autoReauth;
+        store.reauthBlockedUntil = 0;
+        if (cfg.autoReauth) pokeOfficial(true);
+      }
       else if (k === 'u' || k === 'U') {
         // on rend la main au terminal avant de lancer git/npm : leur sortie
         // doit être lisible, et le process s'arrête ensuite de toute façon

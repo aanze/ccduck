@@ -9,6 +9,7 @@ const os = require('os');
 const https = require('https');
 const tls = require('tls');
 const { PRICING, claudeProjectDirs } = require('./config');
+const auth = require('./auth');
 
 const H5 = 5 * 3600 * 1000;
 const D7 = 7 * 86400 * 1000;
@@ -307,8 +308,32 @@ class DataStore {
     this.ccVersion = null;          // version de Claude Code vue dans les transcripts (pour le User-Agent)
     this.lastEntryTs = 0;           // horodatage du dernier message vu → détecte la conso en cours
     this.credsMtime = 0;            // suit le renouvellement du token par Claude Code
+    this.lastReauthAt = 0;          // mode auto-reauth : jamais deux tentatives coup sur coup
+    this.reauthBlockedUntil = 0;    // et on n'insiste pas après un échec dur
     this.planCache = null;          // dernier relevé lu de l'app (survit aux réécritures)
     this.official = loadOfficialState();
+  }
+
+  // Renouvellement du token par nos soins — seulement si le mode est armé
+  // (config `autoReauth` ou touche `a`). Une tentative par minute au plus, et
+  // on abandonne pour de bon si le refresh token est mort : dans ce cas seul un
+  // `claude auth login` répare, insister ne ferait que du bruit.
+  async tryReauth(now) {
+    if (!this.cfg || !this.cfg.autoReauth) return null;
+    if (now < this.reauthBlockedUntil || now - this.lastReauthAt < 60 * 1000) return null;
+    this.lastReauthAt = now;
+    try {
+      const r = await auth.refresh(process.env, 15000);
+      this.credsMtime = r.mtime || 0;
+      this.official.lastErr = null;
+      return r;
+    } catch (e) {
+      const code = String((e && e.code) || 'failed');
+      this.official.lastErr = 'reauth: ' + code;
+      const dead = code === 'invalid_grant' || code === 'no refresh token' || code === 'no credentials file';
+      this.reauthBlockedUntil = now + (dead ? 6 * 3600 * 1000 : 5 * 60 * 1000);
+      return null;
+    }
   }
 
   // Interroge l'endpoint officiel. Cadence pilotée par l'activité réelle :
@@ -322,7 +347,7 @@ class DataStore {
     // une autre instance a peut-être déjà rafraîchi : en profiter avant de décider
     adoptDiskIfNewer(o);
 
-    const creds = readOAuthCreds(process.env);
+    let creds = readOAuthCreds(process.env);
     if (!creds) { o.lastErr = 'no token'; o.nextTryAt = now + 10 * 60 * 1000; saveOfficialState(o); return; }
     // Claude Code vient de renouveler le token → on repart tout de suite
     const rotated = this.credsMtime && creds.mtime && creds.mtime !== this.credsMtime;
@@ -332,10 +357,16 @@ class DataStore {
     // Token expiré : inutile de brûler du quota pour un 401 garanti. On attend que
     // Claude Code le renouvelle (surveillance du fichier, vérif toutes les 5 s).
     if (creds.expiresAt && creds.expiresAt < now + 5000 && !rotated) {
-      o.lastErr = 'token expired (Claude Code will refresh)';
-      o.nextTryAt = now + 5000;
-      saveOfficialState(o);
-      return;
+      // mode auto-reauth armé : on renouvelle nous-mêmes et on enchaîne l'appel.
+      // Sinon (défaut), on attend que Claude Code s'en charge.
+      const fresh = await this.tryReauth(now);
+      if (fresh) creds = fresh;
+      else {
+        if (!o.lastErr || !/^reauth:/.test(o.lastErr)) o.lastErr = 'token expired (Claude Code will refresh)';
+        o.nextTryAt = now + 5000;
+        saveOfficialState(o);
+        return;
+      }
     }
 
     if (!force && !rotated) {
@@ -347,10 +378,13 @@ class DataStore {
     try {
       const res = await fetchUsage(creds.token, 'claude-code/' + (this.ccVersion || '2.1.219'), 15000);
       if (res.status === 401) {
-        // token périmé côté serveur : on rebascule sur la surveillance du fichier
-        o.lastErr = 'token expired (Claude Code will refresh)';
+        // Token périmé côté serveur alors que sa date disait le contraire.
+        // En auto-reauth on le renouvelle tout de suite (le prochain tick
+        // rappellera l'endpoint) ; sinon on rebascule sur la surveillance du fichier.
+        const fresh = await this.tryReauth(now);
+        if (!fresh) o.lastErr = 'token expired (Claude Code will refresh)';
         o.fails = 0;
-        o.nextTryAt = now + 8000;
+        o.nextTryAt = now + (fresh ? 500 : 8000);
         saveOfficialState(o);
         return;
       }
