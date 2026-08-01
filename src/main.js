@@ -6,6 +6,7 @@ const { load } = require('./config');
 const { DataStore } = require('./data');
 const { Duck } = require('./duck');
 const update = require('./update');
+const sprites = require('./sprites');
 const ui = require('./ui');
 
 const VERSION = require('../package.json').version;
@@ -24,6 +25,7 @@ Usage: ccduck [options]
   --auto-reauth    renew the expired OAuth token instead of waiting for Claude Code
   --cat, --duck    which animal, for this run only (cccat = ccduck --cat)
   --no-alerts      the animal ignores the gauges: no pointing, no panic
+  --edit           sprite editor: draw the poses, preview live, always revertable
   --help, --version
 
 Keys  : [q] quit  [f] feed  [s] sleeping pill (5 min)  [r] refresh  [m] metric  [c] table  [d] demo  [p] pause
@@ -55,6 +57,7 @@ function parseArgs(argv) {
     else if (a === '--debug-usage') o.debugUsage = true;
     else if (a === '--update') o.update = true;
     else if (a === '--auto-reauth') o.autoReauth = true;
+    else if (a === '--edit') o.edit = true;
     else if (a === '--no-alerts') o.alerts = false;
     // which animal, for this run only: what the `cccat` launcher passes
     else if (a === '--cat') o.pet = 'cat';
@@ -87,6 +90,19 @@ async function run(argv) {
   if (opts.version) { console.log('ccduck ' + VERSION); return; }
 
   if (opts.update) { process.exit(update.runUpdate() ? 0 : 1); }
+
+  // the editor is its own mode: no scanning, no network, no animals to feed
+  if (opts.edit) { require('./edit').run({ pet: opts.pet }); return; }
+
+  // Drawings edited with --edit live in ~/.ccduck-sprites.json and are laid over
+  // the built-in tables here. src/ stays the reference copy, so --edit's 'back to
+  // default' has something to restore from however mangled that file gets.
+  {
+    const { SPR, PAL } = require('./duck');
+    const { SPR_CAT } = require('./cat');
+    const r = sprites.apply({ duck: SPR, cat: SPR_CAT }, PAL);
+    for (const bad of r.rejected) console.error('ccduck: ignored sprite override — ' + bad);
+  }
 
   const cfg = load(opts.config);
   if (opts.autoReauth) cfg.autoReauth = true;

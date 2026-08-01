@@ -83,7 +83,7 @@ A ready-to-use npm package sits in [`dist/`](dist/) (and is attached to GitHub R
 Download the `.tgz`, then:
 
 ```bash
-npm install -g ./ccduck-2.1.1.tgz
+npm install -g ./ccduck-2.5.0.tgz
 ```
 
 (Frozen copy: to update, reinstall the next version's `.tgz`.)
@@ -151,6 +151,29 @@ $env:CCDUCK_HUNGRY_SEC=20; cccat
 ```bash
 Remove-Item Env:CCDUCK_HUNGRY_SEC
 ```
+
+## Drawing the sprites yourself
+
+```bash
+ccduck --edit
+```
+
+```bash
+cccat --edit
+```
+
+Two panels: the pose as the app renders it, and the same pose as its 16×12 grid of
+palette letters, with a cursor. Every keystroke redraws both, so the preview *is* the
+edit. Arrows or `hjkl` move, any palette letter paints, `.` or space erases, `tab` and
+`⇧tab` walk through the poses, `x` swaps between the duck's 22 and the cat's 38.
+
+`s` saves the pose, and the next launch uses it. **`d` puts the current pose back to its
+default drawing and `D` restores every pose of both animals**, whatever state anything is
+in — because an edit never touches `src/`. It is written to `~/.ccduck-sprites.json` and
+laid over the built-in tables at startup, so the drawings compiled into the source remain
+the reference copy: reinstalling, pulling, or hand-mangling that file can none of them
+lose you the originals. A malformed override is reported and skipped rather than taken,
+so a bad edit cannot stop the monitor from starting.
 
 ## Where the numbers come from
 
