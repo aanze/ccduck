@@ -456,6 +456,8 @@ class Duck {
     this.phase = null;          // cycle alerte/panique {name:'point'|'break', until, tgt}
     this.alertIdx = 0;          // round robin across the gauges in alert
     this.blinkUntil = 0;
+    this.stillSince = null;     // since when it has been holding a standing pose
+    this.sitAfter = 0;          // and how long before a cat gives up and sits
     this.bubble = null;         // {text, until, style}
     this.nextBubbleAt = 0;
     this.particles = [];        // {x, y, vx, vy, ch, fg, life, grav, rel}
@@ -689,10 +691,9 @@ class Duck {
     } else if (a.name === 'quack') {
       this.frame = 'quack';
     }
-    if (this.frame === 'stand') {
-      if (t < this.blinkUntil) this.frame = 'blink';
-      else if (Math.random() < dt / 4) this.blinkUntil = t + 0.25;
-    }
+    // the blink used to live here; it now runs in update(), so that it survives
+    // an alert taking the frames over — see runIdleLife (idle life for a held
+    // standing pose)
   }
 
   updateSeeds(dt) {
@@ -928,6 +929,7 @@ class Duck {
         j.leapAt = t;
         j.from = this.x;
         j.to = Math.max(minX, Math.min(maxX, f.x - SPR_W / 2));
+        j.arc = Math.max(4.5, Math.min(8, 3 + Math.abs(j.to - j.from) * 0.22));
         j.missed = false;
         j.beatUntil = t + CAT_LEAP;
       } else if (j.kind === 'leap') { j.kind = 'land'; j.beatUntil = t + rand(0.25, 0.4); }
@@ -936,7 +938,12 @@ class Duck {
     this.dir = f.x < this.x + SPR_W / 2 ? -1 : 1;
     if (j.kind === 'stalk') {
       // creeps in, low and slow, stopping just short of the fly
-      const aim = f.x - SPR_W / 2 + (this.dir < 0 ? 4 : -4);
+      // How far it stops short is the whole length of the pounce that follows.
+      // Four pixels — a quarter of the sprite — left it barely hopping in place;
+      // a fit of zoomies launches from much further out than a careful stalk on
+      // a real fly does.
+      const standoff = j.zoom ? 15 : 4;
+      const aim = f.x - SPR_W / 2 + (this.dir < 0 ? standoff : -standoff);
       this.moveToward(aim, 4, dt, minX, maxX);
       this.frame = Math.floor(t / 0.4) % 2 === 0 ? 'stalkA' : 'stalkB';
     } else if (j.kind === 'wiggle') {
@@ -946,12 +953,16 @@ class Duck {
       // hop decay applied later in update() is compensated here
       const k = Math.min(1, (t - j.leapAt) / CAT_LEAP);
       this.x = Math.max(minX, Math.min(maxX, j.from + (j.to - j.from) * k));
-      this.hop = 4.5 * Math.sin(Math.PI * k) + dt * 6;
+      // the arc rises with the distance covered: a long pounce that stayed as
+      // flat as a short one reads as sliding, not jumping
+      this.hop = (j.arc || 4.5) * Math.sin(Math.PI * k) + dt * 6;
       this.frame = 'leap';
       // the miss, at the top of the arc: the fly jinks away every single time
       if (k > 0.45 && !j.missed) {
         j.missed = true;
-        f.x = Math.max(3, Math.min(this.canvasW - 4, f.x + rand(9, 15) * (Math.random() < 0.5 ? -1 : 1)));
+        // a real fly jinks aside; an imagined one is suddenly over there instead
+        const away = j.zoom ? rand(22, 38) : rand(9, 15);
+        f.x = Math.max(3, Math.min(this.canvasW - 4, f.x + away * (Math.random() < 0.5 ? -1 : 1)));
         f.vx = -f.vx;
         f.vy = -Math.abs(f.vy) - 1;
       }
@@ -1294,6 +1305,29 @@ class Duck {
 
     // walk frames: only meaningful when it actually moved this tick
     this.moving = Math.abs(this.x - xBefore) > 0.02;
+
+    // Idle life for a held standing pose. The blink used to live inside
+    // runIdleLife, so it stopped the moment anything else took the frames over —
+    // an alert, the end of a raid. The duck got away with it because it bobs on
+    // the water; the cat is on dry land and bobs at nothing, so it stood
+    // perfectly motionless, measured at up to 25 s in a row. Here it applies
+    // wherever the pose came from. And a cat left standing for several seconds
+    // does not stand: it sits down.
+    if (this.frame === 'stand' && !this.moving) {
+      if (this.stillSince == null) { this.stillSince = t; this.sitAfter = rand(1.8, 3.5); }
+    } else this.stillSince = null;
+    // once every 2.5 s or so rather than every 4: at ten frames a second a blink
+    // is three frames, and the gaps between them were what read as a freeze
+    if (t >= this.blinkUntil && Math.random() < dt / 2.5) this.blinkUntil = t + 0.28;
+    const blinking = t < this.blinkUntil;
+    if (this.frame === 'stand') {
+      if (this.pet === 'cat' && this.stillSince != null && t - this.stillSince > this.sitAfter) {
+        // the same sit-and-blink cycle the grooming pause uses, rather than a
+        // random blink: it guarantees one about every 1.4 s, where waiting on a
+        // die roll left gaps of eight seconds with nothing moving at all
+        this.frame = cycleFrame('gaze', t - this.stillSince - this.sitAfter);
+      } else if (blinking) this.frame = 'blink';
+    }
 
     // The cat comes down from its tower the moment anything other than the nap
     // needs it (meal, begging, raid, alert…): a quick jump, then business.
