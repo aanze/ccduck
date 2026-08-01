@@ -1,5 +1,5 @@
 'use strict';
-// Framebuffer + sérialisation ANSI (truecolor avec repli 256 couleurs).
+// Framebuffer + ANSI serialisation (truecolor, with a 256-colour fallback).
 
 const ESC = '\x1b[';
 
@@ -12,7 +12,7 @@ function colorMode(env, forced) {
   return '256';
 }
 
-// 0xRRGGBB -> index xterm 256 (cube 6x6x6 + rampe de gris)
+// 0xRRGGBB -> xterm 256 index (6x6x6 cube + grey ramp)
 function to256(rgb) {
   const r = (rgb >> 16) & 255, g = (rgb >> 8) & 255, b = rgb & 255;
   if (r === g && g === b) {
@@ -63,7 +63,7 @@ class Screen {
   hline(y, x0, x1, c, fg) {
     for (let x = x0; x <= x1; x++) this.set(x, y, c, fg);
   }
-  // Sérialise l'écran entier (adressage curseur par ligne, runs de couleurs).
+  // Serialise the whole screen (cursor addressing per line, colour runs).
   render() {
     const tc = this.mode === 'tc';
     let out = ESC + '?2026h' + ESC + 'H';
@@ -91,7 +91,7 @@ class Screen {
     out += ESC + '?2026l';
     return out;
   }
-  // Rendu "en flux" : lignes séparées par \n, sans adressage curseur (pour --once).
+  // Stream rendering: lines separated by \n, no cursor addressing (for --once).
   renderLines() {
     const tc = this.mode === 'tc';
     const lines = [];

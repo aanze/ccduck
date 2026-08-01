@@ -1,21 +1,21 @@
 'use strict';
-// Renouvellement du token OAuth — mode « auto-reauth », DÉSACTIVÉ par défaut.
+// OAuth token renewal — the "auto-reauth" mode, OFF by default.
 //
-// Même mécanisme que Claude Code lui-même : POST /v1/oauth/token sur
-// platform.claude.com, `grant_type=refresh_token`, avec le client_id public du
-// CLI. La réponse renvoie un NOUVEAU refresh token : chez Anthropic il tourne à
-// chaque usage. Il faut donc le réécrire, sinon le renouvellement suivant
-// partirait avec un jeton mort — c'est tout le risque de ce mode, et c'est
-// pour ça qu'il ne s'active pas tout seul.
+// Same mechanism Claude Code itself uses: POST /v1/oauth/token on
+// platform.claude.com, `grant_type=refresh_token`, with the CLI public
+// client_id. The response carries a NEW refresh token: Anthropic rotates it on
+// every use. It has to be written back, otherwise the next renewal would go out
+// with a dead token — that is the whole risk of this mode, and the reason it
+// never arms itself.
 //
-// Écrire dans ~/.claude/.credentials.json, c'est toucher au fichier de Claude
-// Code. Trois précautions non négociables :
-//   1. sauvegarde intégrale avant la toute première écriture (.ccduck-backup) ;
-//   2. fusion, jamais remplacement — `mcpOAuth` (les serveurs MCP) et
-//      `organizationUuid` doivent survivre intacts ;
-//   3. écriture atomique (fichier temporaire + rename), et abandon si le
-//      fichier a changé entre la lecture et l'écriture : un autre process a
-//      fait tourner le jeton avant nous, c'est le sien qui fait foi.
+// Writing to ~/.claude/.credentials.json means touching Claude Code's own
+// file. Three non-negotiable safeguards:
+//   1. a full backup before the very first write (.ccduck-backup);
+//   2. merge, never replace — `mcpOAuth` (the MCP servers) and
+//      `organizationUuid` must survive untouched;
+//   3. atomic write (temp file + rename), and giving up when the file changed
+//      between the read and the write: another process rotated the token
+//      before us, and its version is the one that counts.
 
 const https = require('https');
 const fs = require('fs');
@@ -24,14 +24,14 @@ const os = require('os');
 
 const HOST = 'platform.claude.com';
 const TOKEN_PATH = '/v1/oauth/token';
-// client_id public du CLI Claude Code (lu dans le binaire, appairé à platform.claude.com)
+// Claude Code CLI public client_id (read from the binary, paired with platform.claude.com)
 const CLIENT_ID = '9d1c250a-e61b-44d9-88ed-5944d1962f5e';
 
 function fail(code, msg) {
   return Object.assign(new Error(msg || code), { code });
 }
 
-// Le fichier que Claude Code utilise réellement, dans l'ordre où il le cherche.
+// The file Claude Code actually uses, in the order it looks for it.
 function credsPath(env) {
   if (env.CLAUDE_CONFIG_DIR) {
     const p = path.join(env.CLAUDE_CONFIG_DIR, '.credentials.json');
@@ -66,7 +66,7 @@ function post(body, timeoutMs) {
   });
 }
 
-// Renouvelle le token et réécrit le fichier. Renvoie {token, expiresAt}.
+// Renews the token and rewrites the file. Returns {token, expiresAt}.
 async function refresh(env, timeoutMs) {
   const p = credsPath(env);
   let raw, st;
@@ -74,7 +74,7 @@ async function refresh(env, timeoutMs) {
     st = fs.statSync(p);
     raw = fs.readFileSync(p, 'utf8');
   } catch (e) {
-    // macOS range le token dans le Trousseau : pas de fichier à renouveler ici
+    // macOS keeps the token in the Keychain: no file to renew here
     throw fail('no credentials file');
   }
   let j;
@@ -84,10 +84,10 @@ async function refresh(env, timeoutMs) {
 
   const res = await post({ grant_type: 'refresh_token', refresh_token: o.refreshToken, client_id: CLIENT_ID }, timeoutMs);
   let data = null;
-  try { data = JSON.parse(res.body); } catch (e) { /* réponse illisible */ }
+  try { data = JSON.parse(res.body); } catch (e) { /* unreadable response */ }
   if (res.status !== 200) {
-    // invalid_grant = le refresh token est mort (déjà tourné ailleurs, ou révoqué) :
-    // insister ne sert à rien, seul un `claude auth login` répare
+    // invalid_grant = the refresh token is dead (already rotated elsewhere, or revoked):
+    // insisting is pointless, only `claude auth login` fixes it
     throw fail((data && data.error) || 'http ' + res.status);
   }
   if (!data || typeof data.access_token !== 'string') throw fail('no access_token');
@@ -95,13 +95,13 @@ async function refresh(env, timeoutMs) {
   const expiresAt = data.expires_at ? Number(data.expires_at) * (String(data.expires_at).length > 12 ? 1 : 1000)
     : Date.now() + (Number(data.expires_in) || 8 * 3600) * 1000;
 
-  // Sauvegarde avant la première écriture : si quoi que ce soit tourne mal, le
-  // fichier d'origine reste récupérable à la main.
+  // Backup before the first write: if anything goes wrong, the original file
+  // can still be restored by hand.
   const backup = p + '.ccduck-backup';
-  try { if (!fs.existsSync(backup)) fs.writeFileSync(backup, raw); } catch (e) { /* pas bloquant */ }
+  try { if (!fs.existsSync(backup)) fs.writeFileSync(backup, raw); } catch (e) { /* not blocking */ }
 
-  // Relecture juste avant d'écrire : si le fichier a bougé depuis, un autre
-  // process a renouvelé de son côté — sa version fait foi, on ne l'écrase pas.
+  // Re-read right before writing: if the file moved since, another process
+  // renewed on its side — its version wins, we do not overwrite it.
   let cur, curSt;
   try {
     curSt = fs.statSync(p);
@@ -121,7 +121,7 @@ async function refresh(env, timeoutMs) {
   };
   const tmp = p + '.ccduck.tmp';
   fs.writeFileSync(tmp, JSON.stringify(merged, null, 2));
-  fs.renameSync(tmp, p);   // atomique : personne ne voit un fichier à moitié écrit
+  fs.renameSync(tmp, p);   // atomic: nobody ever sees a half-written file
 
   return { token: data.access_token, expiresAt, mtime: fs.statSync(p).mtimeMs };
 }

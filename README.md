@@ -1,55 +1,53 @@
 # ccduck 🦆
 
-Moniteur de consommation **Claude Code** dans le terminal, avec un canard de debug
-jaune en pixel art qui vit sa vie sur l'eau… et panique quand tes limites approchent.
+A **Claude Code** usage monitor for your terminal, with a yellow pixel-art debug duck
+that lives its own life on the water… and panics when your limits get close.
 
-- **Jauges alignées sur les vraies limites Anthropic** : bloc SESSION 5h, WEEK, et famille
-  premium (FABLE ou OPUS) sur la semaine — avec les **pourcentages officiels de `/usage`**
-  quand Claude Code les a mis en cache localement (marqués `•`), estimation `≈` sinon
-- **Toutes les infos** : coût équivalent API, tokens (in/out/cache), total du jour, débit
-  $/h et tok/min, projection de fin de bloc, messages du jour, part des sous-agents,
-  tableau par modèle
-- **La mascotte** vit sa vie : elle nage avec un sillage, dérive, barbote tête sous l'eau,
-  se lisse les plumes, dort (siestes jusqu'à 1 min quand tout est sous 30 %, 30 s sinon)
-  et ne s'exprime qu'en onomatopées (« quack », « zzz… ») — seuls les avertissements de
-  limites ont droit à du texte. Dès qu'une jauge passe **70 %**, elle court se placer sous la pointe de la jauge
-  fautive et la pointe de l'aile ; à **90 %** c'est la **panique** — par phases de 20-30 s,
-  entrecoupées d'un tour du bassin ponctué de « quack », puis ça repart. **Plusieurs
-  jauges au-dessus du seuil sont traitées à tour de rôle**, une par phase de pointage, et
-  une pointe `▲` marque chacune d'elles. Exception : la jauge premium (FABLE/OPUS) ne
-  déclenche qu'une **alerte douce**, jamais la panique — les autres modèles restent
-  utilisables — et à gravité égale elle s'efface devant une limite globale, qui, elle,
-  bloquera tout. Une vraie panique monopolise le cycle : ce n'est plus le moment de faire
-  la tournée. Touche `f` pour
-  lui **jeter des graines** : elle accourt (même en pleine panique), picore un moment
-  (« nom nom nom »), puis retourne à ses occupations — les graines restantes flottent
-  pour plus tard. Touche `s` pour lâcher une **gélule sédative** bicolore : elle la prend
-  pour de la nourriture, la gobe… et s'endort **5 minutes**, paisible, même en pleine
-  panique. Et après un bon repas, un petit « plop » de temps en temps — queue relevée
-  deux ou trois secondes, le temps de la commission — puis la crotte dérive au fil de
-  l'eau une minute avant de disparaître. Sans repas depuis **10 minutes**, elle vient
-  réclamer : elle traverse le bassin, colle sa grosse tête plein cadre et quacke à
-  s'en décrocher le bec, bulle imagée à l'appui, et elle repasse toutes les 1 à 2 min
-  jusqu'à ce qu'on cède. Si on ne cède pas, **elle revient de plus en plus souvent**
-  (toutes les 35-70 s, puis 22-45 s), et au bout de **30 minutes** elle ne demande plus :
-  elle saute sur les **barres de progression**, en arrache des miettes qu'elle va picorer
-  sur l'eau, et laisse les jauges **en gruyère**. Les trous se referment très lentement,
-  en quatre stades sur 4 minutes — et une miette n'étant pas un repas, elle y revient
-  tant que personne ne la nourrit pour de bon. Deux poses marquées ne s'enchaînent jamais
-  d'une image à l'autre : elle se redresse toujours entre les deux.
-- **La météo** s'invite : toutes les 7 à 25 min, une **averse** de 30 s à 5 min traverse
-  le bassin (gouttes devant le canard, éclaboussures sur l'eau). Au bout de quelques
-  secondes elle lève le bec vers le ciel, regarde à gauche puis à droite, et se met à
-  barboter comme une folle en s'éclaboussant — 10 s au plus, renouvelable tant qu'il
-  pleut mais jamais deux fois de suite sans 30 s de répit.
-- Optimisé pour le panneau terminal étroit de la fenêtre Claude Code (56 colonnes et plus,
-  mode mini en dessous), zéro dépendance, Node ≥ 18. UI en anglais.
+- **Gauges aligned with Anthropic's real limits**: the 5-hour SESSION block, WEEK, and the
+  premium family (FABLE or OPUS) over the week — with the **official percentages from
+  `/usage`** when Claude Code has them cached locally (marked `•`), estimates `≈` otherwise
+- **Everything else**: API-equivalent cost, tokens (in/out/cache), daily total, $/h and
+  tok/min burn rates, end-of-block projection, messages today, sub-agent share, per-model
+  table
+- **The mascot** lives its own life: it swims with a wake, drifts, dabbles head-down,
+  preens its feathers, sleeps (naps up to 1 min when everything is below 30 %, 30 s
+  otherwise) and only ever speaks in onomatopoeia (“quack”, “zzz…”) — only limit warnings
+  get actual words. As soon as a gauge crosses **70 %**, it swims under that gauge's tip
+  and points at it with its wing; at **90 %** it's full **panic** — in 20-30 s bursts,
+  broken up by a lap around the pond punctuated with “quack”, then it starts over.
+  **Several gauges above the threshold are handled in turn**, one per pointing burst, and
+  a `▲` marker sits over each of them. One exception: the premium gauge (FABLE/OPUS) only
+  ever triggers a **soft alert**, never panic — the other models stay usable — and at
+  equal severity it steps aside for a global limit, which will block everything. Real
+  panic monopolises the cycle: that's no time for a tour. Press `f` to **throw it some
+  seeds**: it rushes over (even mid-panic), pecks for a while (“nom nom nom”), then goes
+  back to its business — leftover seeds keep floating for later. Press `s` to drop a
+  two-tone **sedative pill**: it mistakes it for food, swallows it… and sleeps for
+  **5 minutes**, peaceful, even in full panic. And after a good meal, the occasional
+  little “plop” — tail up for two or three seconds, the time it takes — then the dropping
+  drifts downstream for a minute before sinking. With no food for **10 minutes** it comes
+  begging: it crosses the pond, presses its big head against the screen and quacks its
+  beak off, picture bubble included, and comes back every 1 to 2 min until you give in.
+  If you don't, **it comes back more and more often** (every 35-70 s, then 22-45 s), and
+  after **30 minutes** it stops asking: it jumps at the **progress bars**, tears crumbs
+  off them to peck from the water, and leaves the gauges **full of holes**. Those close up
+  very slowly, in four stages over 4 minutes — and since a crumb isn't a meal, it keeps
+  coming back until someone feeds it properly. Two distinctive poses never follow each
+  other from one frame to the next: it always straightens up in between.
+- **Weather** shows up: every 7 to 25 min, a **shower** lasting 30 s to 5 min crosses the
+  pond (raindrops in front of the duck, splashes on the water). After a few seconds it
+  raises its beak to the sky, looks left then right, and starts dabbling like mad,
+  splashing everywhere — 10 s at most, repeatable while the rain lasts but never twice in
+  a row without a 30 s break.
+- Built for the narrow terminal panel of the Claude Code window (56 columns and up, mini
+  mode below that), zero dependencies, Node ≥ 18.
 
-## Installation
+## Install
 
-Prérequis : [Node.js](https://nodejs.org) ≥ 18 (fourni avec npm — déjà présent si Claude Code tourne).
+Requires [Node.js](https://nodejs.org) ≥ 18 (ships with npm — already there if Claude Code
+is running).
 
-### Depuis le dépôt (recommandé)
+### From the repository (recommended)
 
 ```bash
 git clone https://github.com/aanze/ccduck.git
@@ -57,179 +55,178 @@ cd ccduck
 npm install -g .
 ```
 
-> Sous Windows, `npm install -g <dossier>` crée une **jonction** vers le clone :
-> un simple `git pull` dans le clone met à jour la commande, sans réinstaller —
-> c'est ce que fait la touche `u`. (En SSH : `git clone git@github.com:aanze/ccduck.git`.)
+> On Windows, `npm install -g <folder>` creates a **junction** to the clone: a plain
+> `git pull` in the clone updates the command, no reinstall needed — which is exactly what
+> the `u` key does. (Over SSH: `git clone git@github.com:aanze/ccduck.git`.)
 
-### Depuis le package fourni (sans clone)
+### From the bundled package (no clone)
 
-Un paquet npm prêt à l'emploi est fourni dans [`dist/`](dist/) (et attaché aux
-Releases GitHub). Télécharger le `.tgz` puis :
+A ready-to-use npm package sits in [`dist/`](dist/) (and is attached to GitHub Releases).
+Download the `.tgz`, then:
 
 ```bash
-npm install -g ./ccduck-1.15.0.tgz
+npm install -g ./ccduck-1.15.1.tgz
 ```
 
-(Copie figée : pour mettre à jour, réinstaller le `.tgz` de la version suivante.)
+(Frozen copy: to update, reinstall the next version's `.tgz`.)
 
-### En une ligne (sans clone)
+### One-liner (no clone)
 
 ```bash
 npm install -g git+https://github.com/aanze/ccduck.git
 ```
 
-Ensuite, depuis **n'importe quel terminal, n'importe où** :
+Then, from **any terminal, anywhere**:
 
 ```bash
 ccduck
 ```
 
-(`claude-duck` fonctionne aussi.) Désinstallation : `npm uninstall -g ccduck`.
+(`claude-duck` works too.) Uninstall with `npm uninstall -g ccduck`.
 
-### Vérifier
+### Check
 
 ```bash
 ccduck --version
 ccduck --once
 ```
 
-Si la commande est introuvable : vérifier que le dossier global npm (`npm prefix -g`,
-typiquement `%APPDATA%\npm` sous Windows) est dans le `PATH`, puis rouvrir le terminal.
+If the command isn't found: make sure npm's global folder (`npm prefix -g`, typically
+`%APPDATA%\npm` on Windows) is on your `PATH`, then reopen the terminal.
 
-## D'où viennent les chiffres ?
+## Where the numbers come from
 
-**Aucune connexion à faire, aucune clé à fournir.** ccduck retient, fenêtre par fenêtre,
-**le relevé le plus frais** parmi les sources ci-dessous — jamais un mélange :
+**Nothing to connect, no key to provide.** Window by window, ccduck keeps **the freshest
+reading** among the sources below — never a blend of them:
 
-0. **Relevé de l'app Claude** (`•`, socle) : `%APPDATA%/Claude/plan-usage-history.json`
-   (macOS : `~/Library/Application Support/Claude/`). L'app y écrit son propre relevé
-   **toutes les 5 min** — `fh` = session 5 h, `sd` = hebdo, en pourcentage. Aucun token,
-   aucun appel réseau : **ni 401 ni 429 possibles**. C'est ce qui garantit des chiffres
-   justes en permanence, même token expiré.
+0. **The Claude app's own reading** (`•`, the bedrock):
+   `%APPDATA%/Claude/plan-usage-history.json` (macOS:
+   `~/Library/Application Support/Claude/`). The app writes its own reading there **every
+   5 min** — `fh` = 5-hour session, `sd` = weekly, as percentages. No token, no network
+   call: **no 401 and no 429 possible**. This is what keeps the numbers right at all
+   times, even with an expired token.
 
-Puis, quand c'est disponible et plus récent :
+Then, when available and more recent:
 
-1. **Endpoint officiel `/usage`** (`•`, temps réel + compteur Fable) :
-   `api.anthropic.com/api/oauth/usage`, authentifié avec le token OAuth **déjà présent**
-   sur le poste (`~/.claude/.credentials.json`, ou le Trousseau sur macOS). C'est
-   littéralement ce qu'affiche l'écran `/usage` de Claude Code — **les trois jauges,
-   bucket Fable compris**, resets exacts. Rafraîchi toutes les ~2 min (jitter pour ne pas
-   marteler l'endpoint), dernière valeur persistée dans `~/.ccduck-usage.json` pour les
-   relances, backoff respecté sur 429, `r` force un rafraîchissement immédiat. Le token
-   n'est jamais loggé ni envoyé ailleurs que chez Anthropic ; `ccduck --debug-usage`
-   affiche la date d'expiration du token et la réponse brute. **Par défaut, le
-   `refreshToken` n'est jamais utilisé** : chez Anthropic il tourne à chaque usage, s'en
-   servir sans précaution déconnecterait ton Claude Code. Quand le token expire (~8 h),
-   ccduck surveille le fichier de credentials et repart dans les secondes qui suivent son
-   renouvellement par Claude Code ; entre-temps les jauges restent justes grâce à la
-   source 0, mais le bucket Fable passe en estimation `≈` et les heures de reset se
-   perdent. La touche `a` arme le mode [auto-reauth](#auto-reauth--touche-a), qui
-   renouvelle le token à ta place.
-2. **Cache local de Claude Code** : `~/.claude/vscode-claude-status-cache.json` — utilisé
-   par fenêtre **uniquement s'il est plus récent** que la dernière réponse API. Attention :
-   ce fichier n'est alimenté que quand l'extension VS Code tourne ; sur les autres postes
-   il fige (parfois plusieurs heures), d'où la règle « le plus frais gagne ».
-3. **Estimation locale** (`≈`) : lecture des transcripts (`~/.claude/projects/**/*.jsonl`),
-   déduplication, agrégation par modèle — source des coûts, débits, projections et du
-   tableau (infos que `/usage` ne donne pas), et repli des jauges si aucune donnée
-   officielle n'est disponible. Pour Fable, deux replis : si un relevé officiel du bucket
-   existe mais a vieilli (API muette, token expiré), on repart de sa dernière valeur et on
-   la fait bouger **comme l'hebdo globale**, qui, elle, reste rafraîchie par la source 0 —
-   et seulement si les transcripts montrent de la conso premium depuis ce relevé, pour
-   qu'un passage sur un autre modèle ne fasse pas grimper la jauge. Sans aucun relevé du
-   bucket, formule [cccat](https://github.com/Glance-mediametrie/cccat) : part de tokens
-   fable sur 7 j glissants × hebdo officiel ÷ `premiumShare` (~50 % de l'enveloppe).
+1. **The official `/usage` endpoint** (`•`, real time + Fable counter):
+   `api.anthropic.com/api/oauth/usage`, authenticated with the OAuth token **already
+   present** on the machine (`~/.claude/.credentials.json`, or the Keychain on macOS).
+   This is literally what Claude Code's `/usage` screen shows — **all three gauges, Fable
+   bucket included**, with exact reset times. Refreshed roughly every 2 min (with jitter,
+   so the endpoint doesn't get hammered), the last value persisted to
+   `~/.ccduck-usage.json` across restarts, backoff honoured on 429, and `r` forces an
+   immediate refresh. The token is never logged, and never sent anywhere but Anthropic;
+   `ccduck --debug-usage` shows the token's expiry date and the raw response. **By
+   default the `refreshToken` is never used**: Anthropic rotates it on every use, and
+   using it carelessly would sign your Claude Code out. When the token expires (~8 h),
+   ccduck watches the credentials file and picks up within seconds of Claude Code renewing
+   it; meanwhile the gauges stay correct thanks to source 0, but the Fable bucket falls
+   back to an `≈` estimate and the reset times are lost. The `a` key arms
+   [auto-reauth](#auto-reauth--the-a-key), which renews the token for you.
+2. **Claude Code's local cache**: `~/.claude/vscode-claude-status-cache.json` — used per
+   window **only if it is more recent** than the last API response. Careful: that file is
+   only fed while the VS Code extension is running; on other machines it goes stale
+   (sometimes by hours), hence the “freshest wins” rule.
+3. **Local estimate** (`≈`): reading the transcripts
+   (`~/.claude/projects/**/*.jsonl`), deduplicating, aggregating per model — the source
+   for costs, burn rates, projections and the table (things `/usage` does not provide),
+   and the gauges' fallback when no official data is available. For Fable there are two
+   fallbacks: if an official reading of the bucket exists but has gone stale (API silent,
+   token expired), we start from its last value and move it **like the global weekly**,
+   which source 0 keeps refreshing — and only if the transcripts show premium usage since
+   that reading, so that switching to another model doesn't push the gauge up. With no
+   reading of the bucket at all, the [cccat](https://github.com/Glance-mediametrie/cccat)
+   formula: share of fable tokens over a rolling 7 days × official weekly ÷ `premiumShare`
+   (~50 % of the envelope).
 
-L'âge de la donnée officielle est affiché en pied de page dès qu'elle dépasse 5 minutes.
+The age of the official data is shown in the footer as soon as it exceeds 5 minutes.
 
-Il n'y a **pas de jauge journalière** : cette limite n'existe pas chez Anthropic (les
-limites réelles sont le bloc de 5 h et les quotas hebdomadaires). Le total du jour reste
-affiché dans la ligne de stats.
+There is **no daily gauge**: that limit does not exist at Anthropic (the real ones are the
+5-hour block and the weekly quotas). The daily total stays in the stats line.
 
-Pour les jauges estimées, la limite `≈` est **auto-calibrée** sur ton pic historique
-(35 jours, périodes révolues uniquement) ; en train de battre ton record, la jauge
-plafonne vers ~87 % au lieu d'un faux 100 %. Tu peux fixer des limites réelles dans la
-config. La métrique par défaut est le **coût équivalent API** (cache lu 0,1×, écrit
-1,25×/2×) ; touche `m` pour basculer en tokens bruts.
+For estimated gauges, the `≈` limit is **auto-calibrated** on your historical peak
+(35 days, completed periods only); while you're beating your own record the gauge tops out
+around ~87 % instead of a fake 100 %. You can set real limits in the config. The default
+metric is **API-equivalent cost** (cache read 0.1×, written 1.25×/2×); press `m` to switch
+to raw tokens.
 
-## Touches
+## Keys
 
-| Touche | Action |
+| Key | Action |
 |---|---|
-| `q` | quitter |
-| `f` | jeter une poignée de graines au canard |
-| `s` | lâcher une gélule sédative (dodo 5 min, même en panique) |
-| `r` | rafraîchir maintenant (sinon toutes les 10 s) |
-| `m` | métrique : cost → tokens → no-cache |
-| `c` | afficher/masquer le tableau par modèle |
-| `d` | démo : 75 % → 93 % → balayage → off (pour voir le canard s'exciter) |
-| `p` / espace | pause |
-| `u` | installer la mise à jour quand l'en-tête en propose une |
-| `a` | auto-reauth : renouveler soi-même le token expiré, ou non (défaut : non) |
+| `q` | quit |
+| `f` | throw a handful of seeds to the duck |
+| `s` | drop a sedative pill (5 min nap, even mid-panic) |
+| `r` | refresh now (otherwise every 10 s) |
+| `m` | metric: cost → tokens → no-cache |
+| `c` | show/hide the per-model table |
+| `d` | demo: 75 % → 93 % → sweep → off (to watch the duck lose it) |
+| `p` / space | pause |
+| `u` | install the update when the header offers one |
+| `a` | auto-reauth: renew the expired token yourself, or not (default: not) |
 
-## Mises à jour
+## Updates
 
-Au lancement, ccduck regarde s'il existe une version plus récente. Quand c'est le cas,
-l'en-tête l'annonce — `CCDUCK v1.11.2 → v1.12.0 [u]` — et la touche `u` l'installe :
-`git pull` si la commande pointe sur un clone (cas de `npm install -g <dossier>`, qui
-crée une jonction), sinon réinstallation npm depuis le dépôt. Hors interface :
+On startup, ccduck checks whether a newer version exists. When there is one, the header
+says so — `CCDUCK v1.11.2 → v1.12.0 [u]` — and the `u` key installs it: `git pull` if the
+command points at a clone (the `npm install -g <folder>` case, which creates a junction),
+otherwise an npm reinstall from the repository. Outside the interface:
 
 ```bash
 ccduck --update
 ```
 
-**Rien ne s'installe tout seul** : la touche ou la commande décide. La détection lit le
-`package.json` de la branche par défaut sur `raw.githubusercontent.com` (dépôt public,
-aucune authentification), au plus **une fois toutes les 6 h** — résultat mis en cache
-dans `~/.ccduck-update.json`. C'est le seul appel réseau de ccduck en dehors de
-l'endpoint d'usage d'Anthropic ; `"checkUpdates": false` dans la config le coupe
-entièrement. Un échec est silencieux : une panne réseau ne doit jamais gêner les jauges.
+**Nothing installs itself**: the key or the command decides. Detection reads the
+`package.json` of the default branch on `raw.githubusercontent.com` (public repository, no
+authentication), at most **once every 6 h** — the result is cached in
+`~/.ccduck-update.json`. It is the only network call ccduck makes besides Anthropic's usage
+endpoint; `"checkUpdates": false` in the config disables it entirely. Failures are silent:
+a network outage must never get in the way of the gauges.
 
-## Auto-reauth — touche `a`
+## Auto-reauth — the `a` key
 
-Le token OAuth de Claude Code vit ~8 h. Passé ce délai, la source n°1 se tait : les jauges
-SESSION et WEEK restent justes grâce au fichier de l'app, mais **le bucket Fable bascule en
-estimation `≈` et les heures de reset disparaissent** — seule l'API les fournit.
+Claude Code's OAuth token lives for ~8 h. Past that, source 1 goes quiet: the SESSION and
+WEEK gauges stay correct thanks to the app's file, but **the Fable bucket falls back to an
+`≈` estimate and the reset times disappear** — only the API provides those.
 
-La touche `a` bascule à chaud entre les deux fonctionnements, et le pied de page affiche
-celui qui est actif :
+The `a` key switches between the two behaviours on the fly, and the footer shows which one
+is active:
 
-| Mode | Comportement |
+| Mode | Behaviour |
 |---|---|
-| `auth:off` (défaut) | ccduck se contente de **lire** le fichier de credentials, et attend que Claude Code renouvelle le token |
-| `auth:auto` | ccduck renouvelle lui-même le token expiré — `POST /v1/oauth/token` sur `platform.claude.com`, `grant_type=refresh_token`, puis réécriture du fichier |
+| `auth:off` (default) | ccduck only ever **reads** the credentials file, and waits for Claude Code to renew the token |
+| `auth:auto` | ccduck renews the expired token itself — `POST /v1/oauth/token` on `platform.claude.com`, `grant_type=refresh_token`, then rewrites the file |
 
-Le mode `auto` **écrit** dans `~/.claude/.credentials.json`, qui appartient à Claude Code.
-Précautions : sauvegarde intégrale avant la première écriture
-(`.credentials.json.ccduck-backup`), **fusion et jamais remplacement** (`mcpOAuth` et
-`organizationUuid` restent intacts), écriture atomique, et abandon si le fichier a changé
-entre la lecture et l'écriture — un autre process a renouvelé de son côté, c'est le sien
-qui fait foi. Une tentative par minute au plus, et plus aucune si le refresh token est
-mort : dans ce cas seul `claude auth login` répare.
+The `auto` mode **writes** to `~/.claude/.credentials.json`, which belongs to Claude Code.
+Safeguards: a full backup before the first write (`.credentials.json.ccduck-backup`),
+**merge and never replace** (`mcpOAuth` and `organizationUuid` stay untouched), atomic
+write, and giving up if the file changed between the read and the write — another process
+renewed on its side, and its version wins. One attempt per minute at most, and none at all
+once the refresh token is dead: only `claude auth login` fixes that.
 
-**Le risque résiduel**, et la raison pour laquelle ce mode est désactivé par défaut :
-Anthropic fait tourner le refresh token à chaque usage. Si un `claude` tourne dans un
-terminal au même moment et renouvelle de son côté, le dernier qui écrit gagne — l'autre
-se retrouve avec un jeton mort et devra refaire `claude auth login`.
+**The residual risk**, and the reason this mode is off by default: Anthropic rotates the
+refresh token on every use. If a `claude` is running in a terminal at the same time and
+renews on its side, the last writer wins — the other one ends up with a dead token and
+will have to run `claude auth login` again.
 
-Pour le rendre permanent : `"autoReauth": true` dans la config, ou `ccduck --auto-reauth`
-au lancement. La touche `a` ne vaut que pour la session en cours.
+To make it permanent: `"autoReauth": true` in the config, or `ccduck --auto-reauth` at
+startup. The `a` key only applies to the current session.
 
 ## Options
 
 ```
-ccduck --once          instantané statique (sans animation)
-ccduck --demo[=95]     force les jauges (canard en panique garanti)
-ccduck --size 80x30    taille forcée
-ccduck --metric total  métrique au lancement
-ccduck --update        mettre à jour maintenant
-ccduck --auto-reauth   renouveler le token expiré au lieu d'attendre Claude Code
+ccduck --once          static snapshot (no animation)
+ccduck --demo[=95]     force the gauges (guaranteed duck panic)
+ccduck --size 80x30    force the size
+ccduck --metric total  metric at startup
+ccduck --update        update now
+ccduck --auto-reauth   renew the expired token instead of waiting for Claude Code
 ccduck --help
 ```
 
 ## Configuration — `~/.ccduck.json`
 
-Fichier optionnel, à créer dans le dossier utilisateur. Tout est optionnel :
+Optional file, to be created in your home folder. Everything in it is optional:
 
 ```json
 {
@@ -246,53 +243,53 @@ Fichier optionnel, à créer dans le dossier utilisateur. Tout est optionnel :
 }
 ```
 
-| Clé | Rôle |
+| Key | Role |
 |---|---|
-| `metric` | `cost` (défaut), `total` ou `billable` — **unité d'affichage** des chiffres uniquement ; les `%` estimés sont toujours calculés en coût pondéré (touche `m` pour basculer) |
-| `historyDays` | fenêtre d'historique parsée et de calibrage auto (défaut 35) |
-| `refreshSec` / `fps` | fréquence de rescan des transcripts / d'animation |
-| `alert` / `panic` | seuils (%) qui déclenchent l'alerte et la panique du canard |
-| `planLabel` | libellé affiché dans l'en-tête (ex. `"Max 20x"`) |
-| `premiumFamily` | `auto` (fable si utilisé, sinon opus), `fable` ou `opus` |
-| `premiumShare` | part de l'enveloppe hebdo allouée au modèle premium pour la formule d'estimation (défaut `0.5`) |
-| `weeklyReset` | jour/heure du reset hebdo (`weekday` : 0 = dimanche … 6 = samedi) — utile seulement si le cache officiel de Claude Code est absent ; sinon le reset officiel est utilisé automatiquement |
-| `limits.*` | en **dollars équivalent API**, ou `"auto"` (pic historique) — ne sert qu'aux jauges estimées `≈` |
-| `checkUpdates` | `true` par défaut : vérifie une fois par demi-journée s'il existe une version plus récente. `false` coupe tout appel à GitHub |
-| `autoReauth` | `false` par défaut : à `true`, ccduck renouvelle lui-même le token OAuth expiré (touche `a`, [détails](#auto-reauth--touche-a)) |
+| `metric` | `cost` (default), `total` or `billable` — the **display unit** for the figures only; estimated `%` are always computed on weighted cost (press `m` to switch) |
+| `historyDays` | how much history is parsed, and the auto-calibration window (default 35) |
+| `refreshSec` / `fps` | transcript rescan rate / animation rate |
+| `alert` / `panic` | thresholds (%) that trigger the duck's alert and panic |
+| `planLabel` | label shown in the header (e.g. `"Max 20x"`) |
+| `premiumFamily` | `auto` (fable if used, opus otherwise), `fable` or `opus` |
+| `premiumShare` | share of the weekly envelope allocated to the premium model, for the estimation formula (default `0.5`) |
+| `weeklyReset` | weekly reset day/hour (`weekday`: 0 = Sunday … 6 = Saturday) — only useful when Claude Code's official cache is missing; otherwise the official reset is used automatically |
+| `limits.*` | in **API-equivalent dollars**, or `"auto"` (historical peak) — only used by the estimated `≈` gauges |
+| `checkUpdates` | `true` by default: checks twice a day whether a newer version exists. `false` disables every call to GitHub |
+| `autoReauth` | `false` by default: at `true`, ccduck renews the expired OAuth token itself (the `a` key, [details](#auto-reauth--the-a-key)) |
 
-## Dépannage
+## Troubleshooting
 
-**« J'ai pull mais je n'ai pas les bons chiffres »** → vérifier d'abord `ccduck --version` :
-un `git pull` ne met à jour la commande que si l'installation vient de **clone +
-`npm install -g .`** (jonction). Installé via le `.tgz` ou le one-liner, la commande est
-une copie figée → réinstaller. `ccduck --update` fait le bon geste dans les deux cas.
+**“I pulled but I'm not getting the right numbers”** → check `ccduck --version` first: a
+`git pull` only updates the command when the install came from **clone +
+`npm install -g .`** (junction). Installed from the `.tgz` or the one-liner, the command is
+a frozen copy → reinstall. `ccduck --update` does the right thing in both cases.
 
-**Jauges sans `•`** : le pied de page indique la cause (`usage: …`) :
+**Gauges without `•`**: the footer states the cause (`usage: …`):
 
-| Statut | Cause / remède |
+| Status | Cause / fix |
 |---|---|
-| `no token` | pas de token OAuth local (connexion par clé API ou compte entreprise) → jauges en estimation `≈` uniquement. macOS : le token est lu depuis le Trousseau. |
-| `rate-limited (retry Xmin)` | délai **imposé par le serveur** (`retry-after`, parfois ~1 h) : son budget est petit, partagé avec l'écran `/usage` de Claude Code et vraisemblablement compté par IP de sortie (bureau = IP commune). Ne pas insister (ça aggrave) ; repli cache/`≈` en attendant, ça se résorbe seul |
-| `tls (proxy? see README)` | proxy d'entreprise qui intercepte TLS : lancer avec `NODE_OPTIONS=--use-system-ca` (Node ≥ 22.15) ou pointer `NODE_EXTRA_CA_CERTS` vers le bundle CA interne |
-| `offline` / `timeout` | réseau inaccessible depuis ce poste |
+| `no token` | no local OAuth token (API-key login or enterprise account) → `≈` estimates only. On macOS the token is read from the Keychain. |
+| `rate-limited (retry Xmin)` | delay **imposed by the server** (`retry-after`, sometimes ~1 h): its budget is small, shared with Claude Code's own `/usage` screen and most likely counted per outgoing IP (an office shares one). Don't push (it makes things worse); fall back to cache/`≈` meanwhile, it clears up on its own |
+| `tls (proxy? see README)` | corporate proxy intercepting TLS: run with `NODE_OPTIONS=--use-system-ca` (Node ≥ 22.15) or point `NODE_EXTRA_CA_CERTS` at the internal CA bundle |
+| `offline` / `timeout` | no network reachable from this machine |
 
-`ccduck --debug-usage` affiche l'état persisté (`~/.ccduck-usage.json`) puis force un
-appel de diagnostic et montre la réponse brute.
+`ccduck --debug-usage` prints the persisted state (`~/.ccduck-usage.json`), then forces a
+diagnostic call and shows the raw response.
 
-## Développement
+## Development
 
 ```bash
-node bin/ccduck.js --frames 40 --size 80x24   # rendu en flux, hors TTY
-node bin/ccduck.js --once | node tools/ansi2html.js > preview.html   # aperçu visuel
+node bin/ccduck.js --frames 40 --size 80x24   # stream frames, outside a TTY
+node bin/ccduck.js --once | node tools/ansi2html.js > preview.html   # visual preview
 ```
 
-Zéro dépendance ; sprites du canard dans [src/duck.js](src/duck.js) (grilles 16×12,
-palette par caractère), agrégats dans [src/data.js](src/data.js), rendu dans
+Zero dependencies; duck sprites in [src/duck.js](src/duck.js) (16×12 grids, one palette
+character per pixel), aggregates in [src/data.js](src/data.js), rendering in
 [src/ui.js](src/ui.js).
 
 ## Notes
 
-- Estimation locale : les pourcentages sont des repères, pas les compteurs officiels
-  d'Anthropic (`/usage` dans Claude Code reste la référence).
-- Fonctionne dans Windows Terminal, le panneau terminal de Claude Code, VS Code, etc.
-  (truecolor si disponible, repli 256 couleurs sinon).
+- Local estimate: the percentages are landmarks, not Anthropic's official counters
+  (`/usage` inside Claude Code remains the reference).
+- Works in Windows Terminal, the Claude Code terminal panel, VS Code, and so on
+  (truecolor when available, 256-colour fallback otherwise).

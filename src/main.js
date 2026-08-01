@@ -1,5 +1,5 @@
 'use strict';
-// Orchestration : boucle d'animation, scan incrémental, clavier, modes CLI.
+// Orchestration: animation loop, incremental scan, keyboard, CLI modes.
 
 const { Screen, colorMode, term } = require('./ansi');
 const { load } = require('./config');
@@ -92,10 +92,10 @@ async function run(argv) {
 
   const store = new DataStore(cfg);
 
-  // ---- miroir : recopie le relevé de l'app dans le home ----
-  // Nécessaire quand le terminal n'a pas accès à %APPDATA%\Claude : à lancer
-  // depuis un contexte qui, lui, y accède (--mirror-watch pour rester en tâche
-  // de fond). Le fichier ne contient que des pourcentages d'usage.
+  // ---- mirror: copy the app reading into the home folder ----
+  // Needed when the terminal cannot reach %APPDATA%\Claude: run it
+  // from a context that can (--mirror-watch to keep it running in the
+  // background). The file only ever holds usage percentages.
   if (opts.mirror) {
     const fsx = require('fs'), pth = require('path'), osx = require('os');
     const { planUsageDirs } = require('./data');
@@ -106,10 +106,10 @@ async function run(argv) {
         if (src === dest) continue;
         try {
           const raw = fsx.readFileSync(src, 'utf8');
-          JSON.parse(raw); // ne recopier qu'un JSON complet
+          JSON.parse(raw); // only copy a complete JSON
           fsx.writeFileSync(dest, raw);
           return src;
-        } catch (e) { /* suivant */ }
+        } catch (e) { /* next one */ }
       }
       return null;
     };
@@ -121,7 +121,7 @@ async function run(argv) {
     return;
   }
 
-  // ---- diagnostic : état persisté + appel forcé à l'endpoint officiel ----
+  // ---- diagnostics: persisted state + forced call to the official endpoint ----
   if (opts.debugUsage) {
     const o = store.official;
     const { readOAuthCreds, readPlanUsage, planUsageFiles } = require('./data');
@@ -156,7 +156,7 @@ async function run(argv) {
     return;
   }
 
-  // ---- instantané statique ----
+  // ---- static snapshot ----
   if (opts.once || (!isTTY && !opts.frames)) {
     store.scanSync();
     await store.refreshOfficial();
@@ -172,7 +172,7 @@ async function run(argv) {
       ui: {
         demoLabel: opts.demo != null ? 'DEMO' : '', loading: null, paused: false, showTable: true,
         metricLabel: METRIC_LABELS[metric], version: VERSION,
-        update: cfg.checkUpdates === false ? null : update.cached(VERSION), // cache seul : pas de réseau ici
+        update: cfg.checkUpdates === false ? null : update.cached(VERSION), // cache only: no network here
       },
     });
     process.stdout.write(screen.renderLines() + '\n');
@@ -214,16 +214,16 @@ async function run(argv) {
   let quitting = false;
 
   const refreshSnap = () => { snap = store.snapshot(Date.now(), metric); };
-  // Compteurs officiels : l'intervalle réel est géré dans refreshOfficial (2 min,
-  // backoff sur 429) — ici on se contente de la solliciter régulièrement.
+  // Official counters: the real interval lives in refreshOfficial (2 min,
+  // backoff on 429) — here we just poke it regularly.
   const pokeOfficial = (force) => {
     store.refreshOfficial(force).then(() => { if (!pendingScan) refreshSnap(); }).catch(() => {});
   };
   pokeOfficial(true);
 
-  // Mise à jour : une vérification au lancement (cache de 6 h côté update.js),
-  // jamais bloquante, et l'offre s'affiche dans l'en-tête — c'est la touche u
-  // qui décide, rien ne s'installe tout seul.
+  // Updates: one check at startup (6 h cache on the update.js side), never
+  // blocking, and the offer shows up in the header — the u key decides,
+  // nothing installs itself.
   let updateTo = cfg.checkUpdates === false ? null : update.cached(VERSION);
   const pokeUpdate = (force) => {
     if (cfg.checkUpdates === false) return;
@@ -261,23 +261,23 @@ async function run(argv) {
       if (k === 'q' || k === 'Q' || k === '\x03') { cleanup(); process.exit(0); }
       else if (k === 'r' || k === 'R') {
         if (!pendingScan) pendingScan = store.scanSteps();
-        pokeOfficial(true); // r = je veux les vrais chiffres maintenant
+        pokeOfficial(true); // r = I want the real numbers now
       }
       else if (k === 'm' || k === 'M') { metric = METRICS[(METRICS.indexOf(metric) + 1) % METRICS.length]; refreshSnap(); }
       else if (k === 'f' || k === 'F') { duck.feed(); }
       else if (k === 's' || k === 'S') { duck.dropPill(); }
       else if (k === 'c' || k === 'C') { showTable = !showTable; }
       else if (k === 'a' || k === 'A') {
-        // bascule entre « on attend que Claude Code renouvelle » (défaut) et
-        // « ccduck renouvelle lui-même le token expiré ». Session seulement :
-        // pour rendre ça permanent, "autoReauth": true dans ~/.ccduck.json
+        // toggles between "wait for Claude Code to renew" (default) and
+        // "ccduck renews the expired token itself". Session only: to make it
+        // permanent, set "autoReauth": true in ~/.ccduck.json
         cfg.autoReauth = !cfg.autoReauth;
         store.reauthBlockedUntil = 0;
         if (cfg.autoReauth) pokeOfficial(true);
       }
       else if (k === 'u' || k === 'U') {
-        // on rend la main au terminal avant de lancer git/npm : leur sortie
-        // doit être lisible, et le process s'arrête ensuite de toute façon
+        // hand the terminal back before running git/npm: their output has to
+        // stay readable, and the process stops right after anyway
         if (updateTo) { cleanup(); process.exit(update.runUpdate() ? 0 : 1); }
         else pokeUpdate(true);
       }
@@ -301,7 +301,7 @@ async function run(argv) {
     lastTick = now;
     if (paused) return;
 
-    // pompe le scan en cours (2 fichiers max par image pour rester fluide)
+    // pump the running scan (2 files per frame at most, to stay smooth)
     if (pendingScan) {
       for (let i = 0; i < 2; i++) {
         const st = pendingScan.next();
@@ -321,9 +321,9 @@ async function run(argv) {
       worstPct: geo.worst ? geo.worst.pct : 0,
       soft: geo.soft,
       canvasW: cols,
-      // toutes les jauges en alerte, pas seulement la pire : il les traite à tour de rôle
+      // every gauge in alert, not just the worst: it handles them in turn
       alerts: geo.alerts.map((a) => ({ tip: a.tip, label: a.label.replace(/ .*/, ''), pct: a.pct, eff: a.eff })),
-      // géométrie des barres : ce qu'il lui faut pour aller les grignoter
+      // bar geometry: what it needs to go and nibble them
       bars: { x0: geo.L.barX0, tips: geo.tips },
     });
     ui.draw(screen, {
@@ -346,9 +346,9 @@ async function run(argv) {
   const refreshTimer = setInterval(() => {
     if (!pendingScan) pendingScan = store.scanSteps();
   }, Math.max(3, cfg.refreshSec || 10) * 1000);
-  // Sonde légère : refreshOfficial décide seul s'il doit appeler (cadence, backoff,
-  // token renouvelé). Battre à 3 s permet de repartir dès que Claude Code
-  // renouvelle le token, sans jamais marteler l'endpoint.
+  // Light poll: refreshOfficial alone decides whether to call (pacing, backoff,
+  // renewed token). Beating every 3 s lets it pick up as soon as Claude Code
+  // renews the token, without ever hammering the endpoint.
   const officialTimer = setInterval(pokeOfficial, 3000);
   tick();
 }

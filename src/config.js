@@ -3,8 +3,8 @@ const fs = require('fs');
 const path = require('path');
 const os = require('os');
 
-// Tarifs $/MTok par famille de modèle (entrée, sortie). Cache: écrit 5m = 1,25x in,
-// écrit 1h = 2x in, lu = 0,1x in. Sert aux estimations "équivalent API".
+// $/MTok rates per model family (input, output). Cache: 5m write = 1.25x in,
+// 1h write = 2x in, read = 0.1x in. Used for "API-equivalent" estimates.
 const PRICING = {
   fable:  { i: 10, o: 50 },
   opus:   { i: 5,  o: 25 },
@@ -14,22 +14,22 @@ const PRICING = {
 };
 
 const DEFAULTS = {
-  metric: 'cost',            // 'cost' (éq. API $) | 'total' (tous tokens) | 'billable' (hors cache lu)
-  historyDays: 35,           // fenêtre d'historique parsée (calibrage des limites auto)
+  metric: 'cost',            // 'cost' (API-equivalent $) | 'total' (every token) | 'billable' (cache reads excluded)
+  historyDays: 35,           // how much history is parsed (auto-limit calibration)
   refreshSec: 10,
   fps: 10,
-  alert: 70,                 // seuil alerte (%)
-  panic: 90,                 // seuil panique (%)
+  alert: 70,                 // alert threshold (%)
+  panic: 90,                 // panic threshold (%)
   premiumFamily: 'auto',     // 'auto' | 'fable' | 'opus'
-  premiumShare: 0.5,         // part de l'enveloppe hebdo allouée au modèle premium (formule d'estimation)
-  planUsageDir: null,        // dossier contenant plan-usage-history.json (si %APPDATA%\Claude est inaccessible)
-  weeklyReset: null,         // null = fenêtre glissante 7j, sinon {weekday:0-6 (0=dim), hour:0-23}
-  planLabel: '',             // affiché dans l'en-tête si renseigné (ex: "Max 20x")
-  // Limites par jauge, dans l'unité de la métrique ('auto' = pic historique observé).
+  premiumShare: 0.5,         // share of the weekly envelope for the premium model (estimation formula)
+  planUsageDir: null,        // folder holding plan-usage-history.json (when %APPDATA%\Claude is unreachable)
+  weeklyReset: null,         // null = rolling 7-day window, otherwise {weekday:0-6 (0=Sunday), hour:0-23}
+  planLabel: '',             // shown in the header when set (e.g. "Max 20x")
+  // Per-gauge limits, in the metric's unit ('auto' = observed historical peak).
   limits: { session: 'auto', day: 'auto', week: 'auto', premium: 'auto' },
   showTable: true,
-  checkUpdates: true,        // vérifie une fois par demi-journée si une version plus récente existe
-  autoReauth: false,         // renouveler soi-même le token OAuth expiré (touche `a`) — voir src/auth.js
+  checkUpdates: true,        // checks twice a day whether a newer version exists
+  autoReauth: false,         // renew the expired OAuth token ourselves (the `a` key) — see src/auth.js
 };
 
 function configPath() {
@@ -41,13 +41,13 @@ function load(overridePath) {
   let user = {};
   try {
     user = JSON.parse(fs.readFileSync(p, 'utf8'));
-  } catch (e) { /* pas de config: valeurs par défaut */ }
+  } catch (e) { /* no config: defaults */ }
   const cfg = { ...DEFAULTS, ...user, limits: { ...DEFAULTS.limits, ...(user.limits || {}) } };
   cfg.configPath = p;
   return cfg;
 }
 
-// Répertoires de données Claude Code à scanner.
+// Claude Code data folders to scan.
 function claudeProjectDirs(env) {
   const dirs = [];
   const add = (d) => { if (d && !dirs.includes(d)) dirs.push(d); };

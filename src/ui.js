@@ -1,6 +1,6 @@
 'use strict';
-// Mise en page et rendu : en-tête, jauges, zone du canard (pixels demi-blocs),
-// débit, tableau par modèle, pied de page. Conçu pour un panneau étroit (>= 56 col).
+// Layout and rendering: header, gauges, duck area (half-block pixels), burn
+// rate, per-model table, footer. Built for a narrow panel (>= 56 col).
 
 const { A_BOLD, A_REV, A_DIM } = require('./ansi');
 const { SPR_W, SPR_H, PAL, SEED, PILL_A, PILL_B, POOP, POOP_TOP, POOP_OLD, POOP_LIFE, CURRENT, BITE_REGEN } = require('./duck');
@@ -37,7 +37,7 @@ function levelOf(worstPct, cfg) {
   return 'calm';
 }
 
-// Géométrie d'une ligne de jauge selon la largeur.
+// Geometry of a gauge line, depending on the width.
 function meterLayout(cols) {
   const labelW = cols < 62 ? 5 : 11;
   let figsW = 0;
@@ -48,9 +48,9 @@ function meterLayout(cols) {
   return { labelW, figsW, resetW, barW, barX0: labelW + 1 };
 }
 
-// Positions des pointes de jauges + jauge qui pilote l'humeur du canard.
-// La jauge premium (fable/opus) ne déclenche jamais la vraie panique : les autres
-// modèles restent utilisables, on plafonne sa sévérité à l'alerte (douce).
+// Gauge tip positions + the gauge that drives the duck's mood.
+// The premium gauge (fable/opus) never triggers real panic: the other models
+// stay usable, so its severity is capped at (soft) alert.
 const RANK = { zen: 0, calm: 1, alert: 2, panic: 3 };
 function metersGeometry(snap, cols, cfg) {
   const L = meterLayout(cols);
@@ -64,16 +64,16 @@ function metersGeometry(snap, cols, cfg) {
     if (m.key === 'premium' && eff === 'panic') eff = 'alert';
     const e = { pct, tip, label: m.label, idx, eff, key: m.key };
     if (RANK[eff] >= RANK.alert) alerts.push(e);
-    // À gravité égale, une jauge premium s'efface : sa panique est volontairement
-    // adoucie (les autres modèles restent utilisables), elle ne doit pas masquer
-    // une limite globale qui, elle, bloquera tout.
+    // At equal severity a premium gauge steps aside: its panic is deliberately
+    // softened (the other models stay usable), so it must not mask a global
+    // limit, which will block everything.
     const better = !worst || RANK[eff] > RANK[worst.eff]
       || (RANK[eff] === RANK[worst.eff] && worst.key === 'premium' && m.key !== 'premium')
       || (RANK[eff] === RANK[worst.eff] && (worst.key === 'premium') === (m.key === 'premium') && pct > worst.pct);
     if (better) worst = e;
     return tip;
   });
-  // les plus graves d'abord : c'est l'ordre dans lequel le canard les traite
+  // most severe first: that is the order the duck handles them in
   alerts.sort((a, b) => (RANK[b.eff] - RANK[a.eff]) || (b.pct - a.pct));
   return {
     L, tips, worst, alerts,
@@ -82,8 +82,8 @@ function metersGeometry(snap, cols, cfg) {
   };
 }
 
-// Morsure dans une barre : d'abord un trou franc, puis un remplissage très
-// progressif (░ ▒ ▓) — le gruyère doit rester visible longtemps.
+// A bite in a bar: a clean hole first, then a very gradual refill (░ ▒ ▓) —
+// the swiss cheese has to stay visible for a good while.
 function biteChar(age) {
   const k = age / BITE_REGEN;
   if (k < 0.3) return null;
@@ -94,7 +94,7 @@ function biteChar(age) {
 
 function drawMeter(scr, y, m, L, cfg, blinkOn, isWorst, bites, t) {
   const lbl = L.labelW <= 5 ? clip(m.label, 4) : m.label;
-  // pct null = on ne sait pas : barre vide et « — », surtout pas un chiffre inventé
+  // pct null = we do not know: empty bar and "—", never a made-up figure
   if (m.pct == null) {
     scr.text(1, y, padR(lbl, L.labelW - 1), C.dim);
     for (let i = 0; i < L.barW; i++) scr.set(L.barX0 + i, y, '·', C.barEmpty);
@@ -113,7 +113,7 @@ function drawMeter(scr, y, m, L, cfg, blinkOn, isWorst, bites, t) {
   const lblAt = isWorst && pct >= cfg.alert ? A_BOLD : 0;
   scr.text(1, y, padR(lbl, L.labelW - 1), lblColor, null, lblAt);
 
-  // barre avec fraction sub-cellule
+  // bar with a sub-cell fraction
   const color = pctColor(pct, cfg);
   const fill = Math.min(1, pct / 100) * L.barW;
   const full = Math.floor(fill);
@@ -122,7 +122,7 @@ function drawMeter(scr, y, m, L, cfg, blinkOn, isWorst, bites, t) {
     const x = L.barX0 + i;
     const born = bites && bites.get(i);
     if (i < full && born !== undefined) {
-      // le canard est passé par là
+      // the duck has been here
       const ch = biteChar((t || 0) - born);
       if (ch === null) scr.set(x, y, '·', C.barEmpty);
       else scr.set(x, y, ch, color, null, A_DIM);
@@ -136,9 +136,9 @@ function drawMeter(scr, y, m, L, cfg, blinkOn, isWorst, bites, t) {
   scr.text(x, y, fmtPct(pct), color, null, pctAt);
   x += 5;
   if (L.figsW) {
-    // % toujours canonique (coût pondéré) ; la métrique ne change que ces chiffres
+    // % always canonical (weighted cost); the metric only changes these figures
     let figs;
-    if (m.official) figs = '• ' + fmtMetric(m.used, snapMetric); // % officiel, dépense estimée à côté
+    if (m.official) figs = '• ' + fmtMetric(m.used, snapMetric); // official %, estimated spend next to it
     else if (m.limit == null || snapMetric !== 'cost') figs = (m.auto ? '≈ ' : '') + fmtMetric(m.used, snapMetric);
     else figs = fmtCost(m.used) + '/' + (m.auto ? '≈' : '') + fmtCost(m.limit);
     if (L.figsW >= 20 && snapMetric === 'cost') figs += ' · ' + fmtTok(m.tokens);
@@ -150,12 +150,12 @@ function drawMeter(scr, y, m, L, cfg, blinkOn, isWorst, bites, t) {
   if (isWorst && pct >= cfg.panic && blinkOn) scr.text(Math.min(scr.cols - 2, x + L.resetW), y, '◀', C.red, null, A_BOLD);
 }
 
-let snapMetric = 'cost'; // unité courante pour fmtMetric (évite de la passer partout)
+let snapMetric = 'cost'; // current unit for fmtMetric (saves passing it everywhere)
 
-// Compose les pixels du canard + particules dans les cellules [top .. top+rowsN-1].
-// `lift` = nombre de lignes AU-DESSUS du bassin que le canard a le droit
-// d'occuper (il ne s'en sert que pour aller cogner une barre). Le tampon de
-// pixels est agrandi d'autant vers le haut ; la ligne d'eau, elle, ne bouge pas.
+// Composes the duck pixels + particles into the cells [top .. top+rowsN-1].
+// `lift` = how many rows ABOVE the pond the duck is allowed to occupy (it only
+// uses that to go and strike a bar). The pixel buffer grows upwards by that
+// much; the waterline itself does not move.
 function drawCanvas(scr, top, rowsN, duckInfo, t, lift) {
   const W = scr.cols;
   const extra = Math.max(0, lift || 0);
@@ -165,12 +165,12 @@ function drawCanvas(scr, top, rowsN, duckInfo, t, lift) {
   const px = new Int32Array(W * H).fill(-1);
   const baseY = H - SPR_H;
   const { rows, mirror, x, yOff } = duckInfo;
-  // graines (sous le canard : il nage dessus et les picore)
+  // seeds (under the duck: it swims over them and pecks them)
   for (const s of duckInfo.seeds || []) {
     const sx = Math.round(s.x), sy = baseY + Math.round(s.y);
     if (sx >= 0 && sx < W && sy >= 0 && sy < H) px[sy * W + sx] = SEED;
   }
-  // gélules bicolores (2 px : rouge + blanc)
+  // two-tone pills (2 px: red + white)
   for (const p of duckInfo.pills || []) {
     const sx = Math.round(p.x), sy = baseY + Math.round(p.y);
     if (sy >= 0 && sy < H) {
@@ -178,8 +178,8 @@ function drawCanvas(scr, top, rowsN, duckInfo, t, lift) {
       if (sx + 1 >= 0 && sx + 1 < W) px[sy * W + sx + 1] = PILL_B;
     }
   }
-  // crottes en dérive : petit monticule 2 px de large, sommet plus clair ;
-  // semi-immergé (une seule rangée, foncée) juste avant de couler
+  // drifting droppings: a small mound 2 px wide, lighter on top;
+  // half-sunk (a single darker row) just before going under
   for (const p of duckInfo.poops || []) {
     const sx = Math.round(p.x), sy = baseY + SPR_H - 1;
     const old = (duckInfo.t - p.born) > POOP_LIFE - 12;
@@ -214,7 +214,7 @@ function drawCanvas(scr, top, rowsN, duckInfo, t, lift) {
       else scr.set(cx, yTop + ry, '▄', botC);
     }
   }
-  // particules par-dessus (rel:false = ancrées à l'eau, pas au canard qui oscille)
+  // particles on top (rel:false = anchored to the water, not to the bobbing duck)
   for (const p of duckInfo.particles) {
     const pxY = baseY + (p.rel === false ? 0 : yOff) + p.y;
     const cy = yTop + Math.floor(pxY / 2);
@@ -223,9 +223,9 @@ function drawCanvas(scr, top, rowsN, duckInfo, t, lift) {
   }
 }
 
-// Averse : gouttes procédurales, à la manière de l'eau — aucun état à stocker,
-// tout se déduit de l'index de la goutte et du temps. Dessinée en dernier : la
-// pluie passe devant le canard, et les gouttes qui touchent l'eau éclaboussent.
+// Shower: procedural drops, the same way the water works — no state to store,
+// everything derives from the drop index and time. Drawn last: the rain passes
+// in front of the duck, and drops reaching the water splash.
 function rainHash(i) {
   let x = (i * 2654435761) >>> 0;
   x ^= x >>> 15; x = (x * 2246822519) >>> 0; x ^= x >>> 13;
@@ -234,7 +234,7 @@ function rainHash(i) {
 function drawRain(scr, top, rowsN, waterY, strength, t) {
   if (!(strength > 0)) return;
   const W = scr.cols;
-  const span = rowsN + 1;                       // du haut du bassin à la ligne d'eau
+  const span = rowsN + 1;                       // from the top of the pond down to the waterline
   const n = Math.round(W * 0.2 * strength);
   for (let i = 0; i < n; i++) {
     const x0 = rainHash(i) % W;
@@ -242,7 +242,7 @@ function drawRain(scr, top, rowsN, waterY, strength, t) {
     const phase = (rainHash(i + 7919) % 997) / 997;
     const y = Math.floor(((t * speed / span + phase) % 1) * span);
     if (y >= span - 1) { scr.set(x0, waterY, '∘', C.cyan); continue; }
-    const x = ((x0 - (y >> 1)) % W + W) % W;    // la trajectoire suit la pente du glyphe
+    const x = ((x0 - (y >> 1)) % W + W) % W;    // the path follows the slope of the glyph
     scr.set(x, top + y, '╱', i % 3 === 0 ? C.cyan : C.water1, null, i % 2 ? A_DIM : 0);
   }
 }
@@ -300,7 +300,7 @@ function draw(scr, state) {
 
   if (rows < 17 || cols < 46) return drawMini(scr, state);
 
-  // ---- répartition verticale ----
+  // ---- vertical layout ----
   // fixe: header(1) sep(1) meters(3) ind(1) bubble(1) canvas(n) water(1) sep(1) stats(1) footer(1)
   let canvasRows = 6;
   let tableRows = 0;
@@ -309,16 +309,16 @@ function draw(scr, state) {
   if (ui.showTable && rows >= baseNeed + canvasRows + 1 + famCount + 1) tableRows = 1 + famCount;
   let spare = rows - (baseNeed + canvasRows + tableRows);
   if (spare < 0) { canvasRows = Math.max(6, canvasRows + spare); spare = 0; }
-  canvasRows += Math.min(2, Math.max(0, spare)); // le canard respire si l'écran est haut
+  canvasRows += Math.min(2, Math.max(0, spare)); // the duck gets room to breathe on a tall screen
   const geo = metersGeometry(snap, cols, cfg);
 
-  // ---- en-tête ----
+  // ---- header ----
   let y = 0;
   scr.text(1, y, ' CCDUCK ', C.title, null, A_REV | A_BOLD);
   const ver = 'v' + (ui.version || '?');
   scr.text(10, y, ver, C.faint);
-  let hx = 10 + ver.length + 1; // espace avant le sous-titre
-  // mise à jour disponible : offerte, jamais imposée (touche u)
+  let hx = 10 + ver.length + 1; // space before the subtitle
+  // update available: offered, never forced (the u key)
   if (ui.update) {
     const up = '→ v' + ui.update + ' [u]';
     scr.text(hx, y, up, C.green, null, A_BOLD);
@@ -327,9 +327,9 @@ function draw(scr, state) {
   const sub = 'Claude tokens' + (cfg.planLabel ? ' · ' + cfg.planLabel : '');
   scr.text(hx, y, clip(sub, cols - hx - 20), C.dim);
   if (ui.demoLabel) scr.text(hx + sub.length + 1, y, ' ' + ui.demoLabel + ' ', C.red, null, A_REV | A_BOLD);
-  // âge de la donnée OFFICIELLE (pas du rescan des transcripts) : c'est elle que
-  // portent les jauges, donc c'est sa fraîcheur qui doit être affichée
-  // L'app Claude échantillonne toutes les 5 min : un âge sous 8 min est normal.
+  // age of the OFFICIAL data (not of the transcript rescan): that is what the
+  // gauges carry, so that is the freshness worth showing
+  // The Claude app samples every 5 min: an age under 8 min is normal.
   const usageAge = snap.officialAt ? Math.round((Date.now() - snap.officialAt) / 1000) : null;
   const stale = usageAge == null || usageAge > 8 * 60;
   const right = fmtClock(new Date())
@@ -339,8 +339,8 @@ function draw(scr, state) {
   scr.hline(y++, 0, cols - 1, '─', C.faint);
 
   // ---- jauges ----
-  // trous laissés par le canard affamé : colonne -> date de la morsure, la plus
-  // récente gagne (remordre au même endroit rouvre le trou)
+  // holes left by the starving duck: column -> bite time, the most recent one
+  // wins (biting the same spot again reopens the hole)
   const metersTop = y;
   const biteMap = new Map();
   for (const b of (state.duckInfo.bites || [])) {
@@ -355,27 +355,27 @@ function draw(scr, state) {
     y++;
   }
 
-  // ---- indicateur + canard ----
+  // ---- marker + duck ----
   const indY = y, bubbleY = y + 1, canvasTop = y + 2;
-  // une pointe par jauge en alerte, pas seulement la pire : quand plusieurs
-  // limites approchent, elles doivent toutes se voir
+  // one marker per gauge in alert, not just the worst one: when several limits
+  // are closing in, they all have to be visible
   for (const a of geo.alerts) {
     const col = pctColor(a.pct, cfg);
-    const show = a.eff === 'panic' ? blinkOn : true;   // seule une vraie panique clignote
+    const show = a.eff === 'panic' ? blinkOn : true;   // only real panic blinks
     if (show) scr.set(a.tip, indY, '▲', col, null, A_BOLD);
-    // pointillés entre la pointe et le canard quand il est dessous
+    // dotted line between the marker and the duck when it stands below
     const duckCx = state.duckInfo.x + SPR_W / 2;
     if (Math.abs(duckCx - a.tip) < 3 && a.eff === 'panic' && blinkOn) scr.set(a.tip, bubbleY, '¦', col);
   }
   drawBubble(scr, bubbleY, state.duckInfo, state.bubble, blinkOn);
-  // Pillage : il sort de l'eau pour aller cogner la barre. On agrandit la zone
-  // de dessin vers le haut juste de ce qu'il faut, et on le remonte à
-  // proportion de `reach` — à 1, son bec tombe pile sur la ligne de la jauge.
+  // Raid: it leaves the water to go and strike the bar. We grow the drawing
+  // area upwards by exactly what is needed, and lift it in proportion to
+  // `reach` — at 1, its beak lands exactly on the gauge line.
   const peck = state.duckInfo.peck;
   let duckInfo = state.duckInfo, lift = 0;
   if (peck && peck.reach > 0) {
-    // au repos, le haut du sprite (12 px = 6 lignes) est sur cette ligne-là :
-    // c'est la distance entre elle et la barre qu'il doit franchir
+    // at rest the top of the sprite (12 px = 6 lines) sits on this row:
+    // the distance between it and the bar is what it has to clear
     const headRow = canvasTop + canvasRows - 6;
     lift = Math.max(0, headRow - (metersTop + peck.m));
     duckInfo = { ...duckInfo, yOff: duckInfo.yOff - Math.round(peck.reach * lift * 2) };
@@ -384,8 +384,8 @@ function draw(scr, state) {
   const waterY = canvasTop + canvasRows;
   drawWater(scr, waterY, tSec, state.duckInfo.x);
   drawRain(scr, canvasTop, canvasRows, waterY, state.duckInfo.rain || 0, tSec);
-  // miettes arrachées aux barres : elles tombent de la jauge jusqu'au bassin,
-  // où la physique des graines prend le relais (et où il les picore)
+  // crumbs torn off the bars: they fall from the gauge down to the pond,
+  // where the seed physics takes over (and where it pecks them)
   const FALL = 0.7;
   for (const b of (state.duckInfo.bites || [])) {
     const age = (state.duckInfo.t || 0) - b.born;
@@ -398,11 +398,11 @@ function draw(scr, state) {
   y = waterY + 1;
   scr.hline(y++, 0, cols - 1, '─', C.faint);
 
-  // ---- débit / projection ----
+  // ---- burn rate / projection ----
   if (ui.loading) {
     scr.text(1, y, `scanning transcripts… ${ui.loading.done}/${ui.loading.total}`, C.dim);
   } else if (snap.diag) {
-    // aucune source officielle : on montre ce que CE process voit, ici et maintenant
+    // no official source: we show what THIS process sees, here and now
     scr.text(1, y, 'no usage source reachable from this process:', C.orange, null, A_BOLD);
     let dy = y + 1;
     for (const f of snap.diag.files) {
@@ -429,7 +429,7 @@ function draw(scr, state) {
   }
   y++;
 
-  // ---- tableau par modèle ----
+  // ---- per-model table ----
   if (tableRows > 0 && !ui.loading) {
     drawTable(scr, y, snap, cols, famCount);
     y += tableRows;
@@ -443,13 +443,13 @@ function draw(scr, state) {
     const keys = '[q]uit [f]eed [s]edate [r]efresh [m]etric:' + ui.metricLabel + ' [c]table [d]emo'
       + ' [a]uth:' + (cfg.autoReauth ? 'auto' : 'off') + (ui.paused ? ' ▮▮' : '');
     const bits = [];
-    // source réellement retenue : app (fichier local de Claude), api, ou cache VS Code
+    // the source actually kept: app (local Claude file), api, or VS Code cache
     if (snap.officialUsed) bits.push('• src:' + (snap.officialSrc || '?'));
     else bits.push('no official data — run: ccduck --debug-usage');
     if (!snap.planSeen) bits.push('app file: ' + (snap.planErr || 'not found'));
     if (snap.meters.some((m) => m.auto)) bits.push('≈ auto (' + cfg.historyDays + 'd)');
     else if (!snap.officialUsed) bits.push('limits: config');
-    // l'erreur API n'a d'importance que si les chiffres affichés vieillissent
+    // the API error only matters when the displayed figures are going stale
     const usageAge = snap.officialAt ? (Date.now() - snap.officialAt) / 1000 : Infinity;
     if (snap.officialErr && usageAge > 8 * 60) bits.push('usage: ' + snap.officialErr);
     const lim = bits.join(' · ');
@@ -470,7 +470,7 @@ function drawMini(scr, state) {
   for (let i = 0; i < snap.meters.length && y < rows - 2; i++, y++) {
     drawMeter(scr, y, snap.meters[i], geo.L, cfg, blinkOn, geo.worst && geo.worst.idx === i);
   }
-  // canard une ligne sur l'eau
+  // the duck on a single line of water
   if (y < rows) {
     for (let x = 0; x < cols; x++) scr.set(x, y, '~', (x + Math.floor(tSec * CURRENT)) % 8 < 4 ? C.water1 : C.water2, null, A_DIM);
     for (const s of state.duckInfo.seeds || []) {

@@ -1,17 +1,17 @@
 'use strict';
-// Détection et application des mises à jour.
+// Update detection and installation.
 //
-// Détection : lecture du `package.json` de la branche par défaut sur GitHub
-// (raw.githubusercontent.com, dépôt public, aucune authentification). C'est le
-// SEUL appel réseau de ccduck en dehors de l'endpoint d'usage d'Anthropic, il
-// est mis en cache 6 h dans ~/.ccduck-update.json et se coupe entièrement avec
-// `checkUpdates: false` dans la config. Un échec est silencieux : jamais une
-// panne réseau ne doit gêner l'affichage des jauges.
+// Detection: reading the `package.json` of the default branch on GitHub
+// (raw.githubusercontent.com, public repository, no authentication). It is the
+// ONLY network call ccduck makes besides Anthropic's usage endpoint, it is
+// cached for 6 h in ~/.ccduck-update.json and can be disabled entirely with
+// `checkUpdates: false` in the config. Failures are silent: a network outage
+// must never get in the way of the gauges.
 //
-// Application : `git pull` quand la commande pointe sur un clone (cas de
-// `npm install -g <dossier>`, qui crée une jonction), sinon réinstallation
-// npm depuis le dépôt. Dans les deux cas c'est une commande explicite, lancée
-// par une touche ou `--update`, jamais en tâche de fond.
+// Installation: `git pull` when the command points at a clone (the
+// `npm install -g <folder>` case, which creates a junction), otherwise an npm
+// reinstall from the repository. Either way it is an explicit command, fired by
+// a key press or `--update`, never in the background.
 
 const https = require('https');
 const fs = require('fs');
@@ -21,8 +21,8 @@ const { spawnSync } = require('child_process');
 
 const REPO = 'aanze/ccduck';
 const BRANCH = 'master';
-const TTL = 6 * 3600 * 1000;        // une vérification par demi-journée suffit
-const RETRY = 30 * 60 * 1000;       // après un échec, on ne réessaie pas avant 30 min
+const TTL = 6 * 3600 * 1000;        // twice a day is plenty
+const RETRY = 30 * 60 * 1000;       // after a failure, no retry for 30 min
 const ROOT = path.join(__dirname, '..');
 
 function statePath() {
@@ -37,7 +37,7 @@ function saveState(s) {
   try { fs.writeFileSync(statePath(), JSON.stringify(s)); } catch (e) { /* disque en lecture seule : tant pis */ }
 }
 
-// Comparaison de versions x.y.z — suffixe éventuel ignoré.
+// x.y.z version comparison — any suffix is ignored.
 function cmpVer(a, b) {
   const p = (v) => String(v || '0').split('.').map((n) => parseInt(n, 10) || 0);
   const A = p(a), B = p(b);
@@ -78,14 +78,14 @@ function fetchLatest(timeoutMs) {
   });
 }
 
-// Version connue sans toucher au réseau (cache) : sert au rendu immédiat.
+// Known version without touching the network (cache): used for immediate rendering.
 function cached(current) {
   const s = loadState();
   if (!s.latest || cmpVer(s.latest, current) <= 0) return null;
   return s.latest;
 }
 
-// Vérification asynchrone. Respecte le cache sauf si `force`.
+// Asynchronous check. Honours the cache unless `force`.
 async function check(current, force) {
   const s = loadState();
   const now = Date.now();
@@ -101,8 +101,8 @@ async function check(current, force) {
   }
 }
 
-// Comment cette copie a-t-elle été installée ? Un clone (jonction npm comprise)
-// se met à jour par git ; tout le reste par réinstallation npm.
+// How was this copy installed? A clone (npm junction included) updates through
+// git; everything else through an npm reinstall.
 function installKind() {
   try {
     if (fs.statSync(path.join(ROOT, '.git')).isDirectory()) return 'git';
@@ -112,25 +112,25 @@ function installKind() {
 
 function updateCommand() {
   if (installKind() === 'git') {
-    return { cmd: 'git', args: ['-C', ROOT, 'pull', '--ff-only'], label: 'git pull dans ' + ROOT };
+    return { cmd: 'git', args: ['-C', ROOT, 'pull', '--ff-only'], label: 'git pull in ' + ROOT };
   }
   const url = 'git+https://github.com/' + REPO + '.git';
   return { cmd: 'npm', args: ['install', '-g', url], label: 'npm install -g ' + url };
 }
 
-// Lance la mise à jour en avant-plan, sortie visible. Retourne true si OK.
+// Runs the update in the foreground, output visible. Returns true on success.
 function runUpdate() {
   const { cmd, args, label } = updateCommand();
   console.log('ccduck: ' + label + '\n');
   const r = spawnSync(cmd, args, { stdio: 'inherit', shell: process.platform === 'win32' });
   if (r.error || r.status !== 0) {
-    console.error('\nccduck: la mise à jour a échoué' + (r.error ? ' (' + r.error.message + ')' : ''));
+    console.error('\nccduck: update failed' + (r.error ? ' (' + r.error.message + ')' : ''));
     return false;
   }
-  // le cache porte encore l'ancienne comparaison : on le vide pour ne pas
-  // rester avec une pastille « mise à jour dispo » après coup
+  // the cache still holds the old comparison: clear it so no stale "update
+  // available" badge lingers afterwards
   saveState({ checkedAt: 0, latest: null, err: null });
-  console.log('\nccduck: à jour — relance la commande.');
+  console.log('\nccduck: up to date — run the command again.');
   return true;
 }
 

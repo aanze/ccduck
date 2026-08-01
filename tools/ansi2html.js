@@ -1,5 +1,5 @@
 'use strict';
-// Convertit un flux ANSI (SGR) en HTML pour prévisualiser les rendus ccduck.
+// Converts an ANSI (SGR) stream to HTML, to preview ccduck renderings.
 // Usage: node tools/ansi2html.js < capture.txt > preview.html
 
 const CUBE = [0, 95, 135, 175, 215, 255];
@@ -35,7 +35,7 @@ function convert(input) {
       while (j < input.length && !/[a-zA-Z]/.test(input[j])) j++;
       const body = input.slice(i + 2, j), cmd = input[j];
       i = j + 1;
-      if (cmd !== 'm') continue; // ignore positionnement/effacement
+      if (cmd !== 'm') continue; // ignore positioning/erasing
       const ps = body.split(';').map(Number);
       for (let k = 0; k < ps.length; k++) {
         const p = ps[k] || 0;

@@ -1,5 +1,5 @@
 'use strict';
-// Formatage compact (anglais) pour l'affichage terminal.
+// Compact formatting for the terminal display.
 
 function fmtTok(n) {
   if (!isFinite(n) || n < 0) n = 0;
@@ -21,7 +21,7 @@ function fmtCost(n) {
   return '$' + String(Math.round(n));
 }
 
-// Valeur d'une métrique dans l'unité de la jauge.
+// A metric's value in the gauge's unit.
 function fmtMetric(n, metric) {
   return metric === 'cost' ? fmtCost(n) : fmtTok(n);
 }
@@ -48,7 +48,7 @@ function fmtPct(p) {
   return String(Math.round(p)).padStart(3) + '%';
 }
 
-// Tronque avec … si trop long.
+// Truncates with … when too long.
 function clip(s, w) {
   if (s.length <= w) return s;
   if (w <= 1) return s.slice(0, Math.max(0, w));

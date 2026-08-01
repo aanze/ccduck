@@ -1,7 +1,7 @@
 'use strict';
-// Lecture des transcripts Claude Code (~/.claude/projects/**/*.jsonl) et agrégats.
-// Chaque ligne "assistant" porte message.usage ; on déduplique par message.id+requestId
-// (les reprises de session recopient des messages) et on garde la dernière occurrence.
+// Reading Claude Code transcripts (~/.claude/projects/**/*.jsonl) and aggregates.
+// Every "assistant" line carries message.usage; we dedupe on message.id+requestId
+// (resumed sessions copy messages over) and keep the last occurrence.
 
 const fs = require('fs');
 const path = require('path');
@@ -14,15 +14,15 @@ const auth = require('./auth');
 const H5 = 5 * 3600 * 1000;
 const D7 = 7 * 86400 * 1000;
 
-// ---- Compteurs officiels /usage ----
-// Source primaire : l'endpoint OAuth qu'utilise Claude Code lui-même
-// (GET https://api.anthropic.com/api/oauth/usage, Bearer = token local de
-// ~/.claude/.credentials.json). Même mécanisme que les statuslines communautaires.
-// Le token ne quitte jamais la machine autrement que vers api.anthropic.com.
-// Renvoie {token, expiresAt, mtime}. On NE touche JAMAIS au refreshToken : chez
-// Anthropic il tourne à chaque usage, l'utiliser déconnecterait Claude Code.
-// On se contente de suivre le fichier : dès que Claude Code renouvelle le token,
-// le mtime change et on repart immédiatement.
+// ---- Official /usage counters ----
+// Primary source: the OAuth endpoint Claude Code itself uses
+// (GET https://api.anthropic.com/api/oauth/usage, Bearer = the local token from
+// ~/.claude/.credentials.json). Same mechanism as the community statuslines.
+// The token never leaves the machine except towards api.anthropic.com.
+// Returns {token, expiresAt, mtime}. We NEVER touch the refreshToken: Anthropic
+// rotates it on every use, and using it would sign Claude Code out.
+// We just watch the file: as soon as Claude Code renews the token, the mtime
+// changes and we pick straight back up.
 function readOAuthCreds(env) {
   const paths = [];
   if (env.CLAUDE_CONFIG_DIR) paths.push(path.join(env.CLAUDE_CONFIG_DIR, '.credentials.json'));
@@ -35,9 +35,9 @@ function readOAuthCreds(env) {
       if (o && typeof o.accessToken === 'string' && o.accessToken) {
         return { token: o.accessToken, expiresAt: Number(o.expiresAt) || 0, mtime: st.mtimeMs };
       }
-    } catch (e) { /* absent : on retombera sur cache/estimation */ }
+    } catch (e) { /* missing: we will fall back to cache/estimate */ }
   }
-  // macOS : Claude Code range le token dans le Trousseau, pas dans un fichier
+  // macOS: Claude Code keeps the token in the Keychain, not in a file
   if (process.platform === 'darwin') {
     try {
       const out = require('child_process').execSync(
@@ -49,15 +49,15 @@ function readOAuthCreds(env) {
       if (o && typeof o.accessToken === 'string' && o.accessToken) {
         return { token: o.accessToken, expiresAt: Number(o.expiresAt) || 0, mtime: 0 };
       }
-    } catch (e) { /* trousseau vide/refusé */ }
+    } catch (e) { /* keychain empty or denied */ }
   }
   return null;
 }
 
-// État persisté des compteurs officiels : survit aux relances de ccduck, pour
-// réafficher la dernière valeur connue ET respecter le backoff (l'endpoint 429
-// sévèrement — chaque relance ne doit PAS refaire un appel à froid).
-// CCDUCK_STATE permet de dérouter l'état (tests : ne jamais écrire dans le vrai fichier)
+// Persisted state of the official counters: survives ccduck restarts, so the
+// last known value can be shown again AND the backoff honoured (the endpoint
+// 429s hard — a restart must NOT fire a cold call).
+// CCDUCK_STATE redirects the state (tests: never write to the real file)
 function officialStatePath() {
   return process.env.CCDUCK_STATE || path.join(os.homedir(), '.ccduck-usage.json');
 }
@@ -71,9 +71,9 @@ function loadOfficialState() {
   } catch (e) { return base; }
 }
 
-// Adopte les compteurs du disque s'ils sont plus frais que ceux en mémoire :
-// plusieurs ccduck peuvent tourner en parallèle, et une instance en échec ne doit
-// JAMAIS réécrire ses vieux chiffres par-dessus ceux qu'une autre vient d'obtenir.
+// Adopt the counters from disk when they are fresher than those in memory:
+// several ccduck can run in parallel, and a failing instance must NEVER write
+// its stale figures over the ones another just obtained.
 function adoptDiskIfNewer(o) {
   try {
     const d = JSON.parse(fs.readFileSync(officialStatePath(), 'utf8'));
@@ -83,23 +83,23 @@ function adoptDiskIfNewer(o) {
       o.fetchedAt = d.fetchedAt || 0;
       return true;
     }
-  } catch (e) { /* pas d'état sur disque */ }
+  } catch (e) { /* no state on disk */ }
   return false;
 }
 
 function saveOfficialState(o) {
   try {
-    adoptDiskIfNewer(o); // garde-fou anti-régression
+    adoptDiskIfNewer(o); // guard against going backwards
     fs.writeFileSync(officialStatePath(), JSON.stringify({
       data: o.data, premium: o.premium, fetchedAt: o.fetchedAt, nextTryAt: o.nextTryAt, lastErr: o.lastErr,
     }));
-  } catch (e) { /* disque plein/verrouillé : tant pis, on garde l'état mémoire */ }
+  } catch (e) { /* disk full or locked: never mind, we keep the in-memory state */ }
 }
 
-// Connexion neuve à chaque appel (pas de pool) : dans un process qui tourne des
-// heures, une socket TLS gardée en vie et coupée par un proxy/pare-feu fait
-// échouer tous les appels suivants. On ajoute aussi les CA du magasin système
-// (proxy d'entreprise qui ré-signe le trafic) sans jamais désactiver la vérification.
+// A fresh connection on every call (no pool): in a process running for hours, a
+// kept-alive TLS socket cut by a proxy or firewall makes every later call fail.
+// We also add the system store CAs (corporate proxies re-signing traffic)
+// without ever disabling verification.
 let usageAgent = null;
 function getAgent() {
   if (usageAgent) return usageAgent;
@@ -109,7 +109,7 @@ function getAgent() {
       const sys = tls.getCACertificates('system') || [];
       if (sys.length) opts.ca = [...(tls.getCACertificates('default') || []), ...sys];
     }
-  } catch (e) { /* Node sans cette API : CA par défaut */ }
+  } catch (e) { /* Node without that API: default CAs */ }
   usageAgent = new https.Agent(opts);
   return usageAgent;
 }
@@ -143,29 +143,29 @@ function fetchUsage(token, userAgent, timeoutMs) {
   });
 }
 
-// SOURCE LA PLUS FIABLE : l'app Claude enregistre son propre relevé d'usage toutes
-// les 5 min dans plan-usage-history.json — `fh` = session 5 h, `sd` = hebdo (en %).
-// Aucun token, aucun appel réseau : ni 401 ni 429 possibles.
-// Fichiers candidats, dans l'ordre de préférence.
+// MOST RELIABLE SOURCE: the Claude app records its own usage reading every
+// 5 min in plan-usage-history.json — `fh` = 5-hour session, `sd` = weekly (as %).
+// No token, no network call: no 401 and no 429 possible.
+// Candidate files, in order of preference.
 function planUsageFiles(env, cfg) {
   const out = [];
   const addFile = (f) => { if (f && !out.includes(f)) out.push(f); };
   let home = null;
   try { home = os.homedir(); } catch (e) { /* ignore */ }
-  // Miroir dans le home : seule voie quand le terminal n'a pas accès au dossier
-  // de l'application (cf. --debug-usage). Alimenté par `ccduck --mirror`.
+  // Mirror in the home folder: the only way when the terminal cannot reach the
+  // application folder (see --debug-usage). Fed by `ccduck --mirror`.
   if (home) addFile(path.join(home, '.ccduck-plan.json'));
   for (const d of planUsageDirs(env, cfg)) addFile(path.join(d, 'plan-usage-history.json'));
   return out;
 }
 
-// L'app Claude est distribuée en paquet MSIX : ce que l'on voit sous
-// %APPDATA%\Claude n'est qu'une VUE VIRTUALISÉE, réservée aux processus portant
-// la même identité de paquet. Un shell lancé par une autre application packagée
-// (Windows Terminal, panneau terminal) reçoit sa propre vue et ne voit donc
-// rien — d'où des ENOENT permanents. Le fichier physique, lui, vit sous
-// %LOCALAPPDATA%\Packages\Claude_*\LocalCache\Roaming\Claude et reste lisible
-// depuis n'importe quel shell : c'est le chemin à privilégier.
+// The Claude app ships as an MSIX package: what shows up under
+// %APPDATA%\Claude is only a VIRTUALISED VIEW, reserved for processes carrying the same
+// package identity. A shell started by another packaged application (Windows
+// Terminal, terminal panel) gets its own view and therefore sees nothing —
+// hence the permanent ENOENT. The physical file itself lives under
+// %LOCALAPPDATA%\Packages\Claude_*\LocalCache\Roaming\Claude and stays readable
+// from any shell: that is the path to prefer.
 let msixCache = null;
 function msixClaudeDirs(env) {
   if (msixCache) return msixCache;
@@ -190,12 +190,12 @@ function msixClaudeDirs(env) {
 function planUsageDirs(env, cfg) {
   const dirs = [];
   const add = (d) => { if (d && !dirs.includes(d)) dirs.push(d); };
-  // chemin physique MSIX en tête : il fonctionne quel que soit le shell
+  // the physical MSIX path first: it works whatever the shell
   for (const d of msixClaudeDirs(env)) add(d);
   // 1) chemin explicite (config planUsageDir ou variable CCDUCK_CLAUDE_DIR)
   add(env.CCDUCK_CLAUDE_DIR);
   if (cfg && cfg.planUsageDir) add(cfg.planUsageDir);
-  // 2) jonction dans le home : contourne un terminal qui n'a pas accès à %APPDATA%\Claude
+  // 2) junction in the home folder: works around a terminal with no access to %APPDATA%\Claude
   try { add(path.join(os.homedir(), '.ccduck-claude')); } catch (e) { /* ignore */ }
   const roots = [env.APPDATA, env.LOCALAPPDATA];
   let home = null;
@@ -213,14 +213,14 @@ function planUsageDirs(env, cfg) {
   return dirs;
 }
 
-// L'app réécrit ce fichier toutes les 5 min : pendant l'opération il disparaît
-// brièvement (ENOENT) ou se lit tronqué. Une lecture ratée ne doit JAMAIS faire
-// perdre la source — d'où la double tentative ici, et le cache côté DataStore.
+// The app rewrites this file every 5 min: while it does, the file briefly
+// disappears (ENOENT) or reads truncated. A failed read must NEVER lose the
+// source — hence the second attempt here, and the cache on the DataStore side.
 function readOnce(p) {
   try {
     return JSON.parse(fs.readFileSync(p, 'utf8'));
   } catch (e) {
-    const t = Date.now(); while (Date.now() - t < 40) { /* fenêtre de réécriture */ }
+    const t = Date.now(); while (Date.now() - t < 40) { /* rewrite window */ }
     return JSON.parse(fs.readFileSync(p, 'utf8'));
   }
 }
@@ -228,8 +228,8 @@ function readOnce(p) {
 function readPlanUsage(env, cfg) {
   let why = null;
   let best = null;
-  // On lit TOUS les candidats et on garde le relevé le plus récent. Prendre le
-  // premier lisible ferait gagner un miroir périmé face au vrai fichier de l'app.
+  // We read EVERY candidate and keep the most recent reading. Taking the first
+  // readable one would let a stale mirror beat the real app file.
   for (const p of planUsageFiles(env, cfg)) {
     try {
       const j = readOnce(p);
@@ -242,12 +242,12 @@ function readPlanUsage(env, cfg) {
       if (u5 == null && u7 == null) { why = why || 'no fh/sd'; continue; }
       const at = Number(last.t) || 0;
       if (best && at <= best.at) continue;
-      // on garde l'historique récent : il sert à calibrer l'extrapolation
+      // we keep the recent history: it calibrates the extrapolation
       const hist = arr.slice(-40).map((s) => ({ t: Number(s.t) || 0, fh: s.u && s.u.fh, sd: s.u && s.u.sd }));
       best = { u5h: u5, u7d: u7, at, path: p, samples: hist };
     } catch (e) {
-      // ENOENT = app pas installée à cet emplacement, on continue ; le reste
-      // (droits, JSON tronqué pendant une écriture) mérite d'être signalé.
+      // ENOENT = app not installed there, keep going; the rest (permissions,
+      // JSON truncated mid-write) is worth reporting.
       if (e && e.code !== 'ENOENT') why = String(e.code || 'parse error');
     }
   }
@@ -255,7 +255,7 @@ function readPlanUsage(env, cfg) {
   return why ? { error: why } : null;
 }
 
-// Repli : cache local écrit par l'extension VS Code / la statusline (parfois périmé).
+// Fallback: local cache written by the VS Code extension / statusline (sometimes stale).
 function readOfficialUsage(env) {
   const paths = [];
   if (env.CLAUDE_CONFIG_DIR) paths.push(path.join(env.CLAUDE_CONFIG_DIR, 'vscode-claude-status-cache.json'));
@@ -300,24 +300,24 @@ function entryMetric(e, metric) {
 class DataStore {
   constructor(cfg) {
     this.cfg = cfg;
-    this.entries = new Map();       // clé dédup -> entrée
+    this.entries = new Map();       // dedupe key -> entry
     this.fileState = new Map();     // chemin -> {size, offset}
     this.lastScanAt = 0;
     this.lastError = null;
     this.seq = 0;
-    this.ccVersion = null;          // version de Claude Code vue dans les transcripts (pour le User-Agent)
-    this.lastEntryTs = 0;           // horodatage du dernier message vu → détecte la conso en cours
-    this.credsMtime = 0;            // suit le renouvellement du token par Claude Code
-    this.lastReauthAt = 0;          // mode auto-reauth : jamais deux tentatives coup sur coup
-    this.reauthBlockedUntil = 0;    // et on n'insiste pas après un échec dur
-    this.planCache = null;          // dernier relevé lu de l'app (survit aux réécritures)
+    this.ccVersion = null;          // Claude Code version seen in the transcripts (for the User-Agent)
+    this.lastEntryTs = 0;           // timestamp of the last message seen → detects ongoing consumption
+    this.credsMtime = 0;            // tracks token renewal by Claude Code
+    this.lastReauthAt = 0;          // auto-reauth mode: never two attempts back to back
+    this.reauthBlockedUntil = 0;    // and no insisting after a hard failure
+    this.planCache = null;          // last app reading (survives the rewrites)
     this.official = loadOfficialState();
   }
 
-  // Renouvellement du token par nos soins — seulement si le mode est armé
-  // (config `autoReauth` ou touche `a`). Une tentative par minute au plus, et
-  // on abandonne pour de bon si le refresh token est mort : dans ce cas seul un
-  // `claude auth login` répare, insister ne ferait que du bruit.
+  // Renewing the token ourselves — only when the mode is armed (config
+  // `autoReauth` or the `a` key). One attempt per minute at most, and we give
+  // up for good once the refresh token is dead: only `claude auth login` fixes
+  // that, and insisting would only make noise.
   async tryReauth(now) {
     if (!this.cfg || !this.cfg.autoReauth) return null;
     if (now < this.reauthBlockedUntil || now - this.lastReauthAt < 60 * 1000) return null;
@@ -336,29 +336,29 @@ class DataStore {
     }
   }
 
-  // Interroge l'endpoint officiel. Cadence pilotée par l'activité réelle :
-  // ~45 s tant qu'on consomme (les chiffres bougent), 3 min au repos. Un raté
-  // réseau ne gèle plus l'affichage — on retente à 20 s, puis 40, 80… (max 5 min).
-  // Seul un 429 impose son délai (retry-after du serveur).
+  // Queries the official endpoint. Pacing driven by real activity: ~45 s while
+  // consuming (the figures move), 3 min when idle. A network miss no longer
+  // freezes the display — we retry at 20 s, then 40, 80… (5 min max).
+  // Only a 429 imposes its own delay (the server retry-after).
   async refreshOfficial(force) {
     const o = this.official;
     const now = Date.now();
     if (o.inFlight) return;
-    // une autre instance a peut-être déjà rafraîchi : en profiter avant de décider
+    // another instance may have refreshed already: use that before deciding
     adoptDiskIfNewer(o);
 
     let creds = readOAuthCreds(process.env);
     if (!creds) { o.lastErr = 'no token'; o.nextTryAt = now + 10 * 60 * 1000; saveOfficialState(o); return; }
-    // Claude Code vient de renouveler le token → on repart tout de suite
+    // Claude Code just renewed the token → start again right away
     const rotated = this.credsMtime && creds.mtime && creds.mtime !== this.credsMtime;
     this.credsMtime = creds.mtime;
     if (rotated) { o.nextTryAt = 0; o.fails = 0; }
 
-    // Token expiré : inutile de brûler du quota pour un 401 garanti. On attend que
-    // Claude Code le renouvelle (surveillance du fichier, vérif toutes les 5 s).
+    // Expired token: no point burning quota on a guaranteed 401. We wait for
+    // Claude Code to renew it (file watch, checked every 5 s).
     if (creds.expiresAt && creds.expiresAt < now + 5000 && !rotated) {
-      // mode auto-reauth armé : on renouvelle nous-mêmes et on enchaîne l'appel.
-      // Sinon (défaut), on attend que Claude Code s'en charge.
+      // auto-reauth armed: we renew it ourselves and chain the call.
+      // Otherwise (the default), we wait for Claude Code to do it.
       const fresh = await this.tryReauth(now);
       if (fresh) creds = fresh;
       else {
@@ -378,9 +378,9 @@ class DataStore {
     try {
       const res = await fetchUsage(creds.token, 'claude-code/' + (this.ccVersion || '2.1.219'), 15000);
       if (res.status === 401) {
-        // Token périmé côté serveur alors que sa date disait le contraire.
-        // En auto-reauth on le renouvelle tout de suite (le prochain tick
-        // rappellera l'endpoint) ; sinon on rebascule sur la surveillance du fichier.
+        // Token expired server-side even though its own date said otherwise.
+        // In auto-reauth we renew it right away (the next tick will call the
+        // endpoint again); otherwise we go back to watching the file.
         const fresh = await this.tryReauth(now);
         if (!fresh) o.lastErr = 'token expired (Claude Code will refresh)';
         o.fails = 0;
@@ -389,14 +389,14 @@ class DataStore {
         return;
       }
       if (res.status === 429) {
-        // retry-after imposé par le serveur (secondes ou date HTTP) — le respecter
-        // scrupuleusement : les 429 de cet endpoint s'aggravent si on insiste.
+        // retry-after imposed by the server (seconds or HTTP date) — honour it
+        // strictly: this endpoint 429s harder if you push.
         const raw = res.headers['retry-after'] || '';
         let ra = Number(raw) * 1000;
         if (!isFinite(ra) || ra <= 0) ra = (Date.parse(raw) || 0) - now;
         o.lastErr = 'rate-limited';
         o.fails = 0;
-        o.nextTryAt = now + Math.max(ra || 0, 60 * 1000); // délai imposé par le serveur
+        o.nextTryAt = now + Math.max(ra || 0, 60 * 1000); // delay imposed by the server
         saveOfficialState(o);
         return;
       }
@@ -410,8 +410,8 @@ class DataStore {
       const j = JSON.parse(res.body);
       const win = (v) => (v && typeof v.utilization === 'number')
         ? { pct: v.utilization / 100, reset: Date.parse(v.resets_at) || 0 } : null;
-      // Source de vérité : le tableau `limits` (c'est lui que l'écran /usage affiche).
-      // Repli sur les champs plats five_hour/seven_day/seven_day_* si absent.
+      // Source of truth: the `limits` array (that is what the /usage screen shows).
+      // Fall back to the flat five_hour/seven_day/seven_day_* fields when absent.
       const lims = Array.isArray(j.limits) ? j.limits : [];
       const byKind = {};
       for (const L of lims) if (L && typeof L.percent === 'number') byKind[L.kind] = L;
@@ -431,20 +431,20 @@ class DataStore {
           if (m && m[1] !== 'oauth_apps' && win(v)) { o.premium = { name: m[1], ...win(v) }; break; }
         }
       }
-      o.raw = j; // pour --debug-usage (contient uniquement des stats, jamais le token)
+      o.raw = j; // for --debug-usage (stats only, never the token)
       o.fetchedAt = now;
-      o.nextTryAt = 0;   // la cadence est pilotée par l'activité, pas par un verrou
+      o.nextTryAt = 0;   // pacing is driven by activity, not by a lock
       o.lastErr = null;
       o.fails = 0;
       saveOfficialState(o);
     } catch (e) {
-      // Diagnostic honnête : on garde le code réel plutôt que de deviner.
+      // Honest diagnostics: we keep the real code rather than guessing.
       const code = String((e && (e.code || (e.cause && e.cause.code))) || '');
       if (code === 'ETIMEDOUT' || (e && e.name === 'AbortError')) o.lastErr = 'timeout';
       else if (/CERT|SELF_SIGNED|UNABLE_TO_VERIFY/i.test(code)) o.lastErr = 'tls ' + code.toLowerCase();
       else o.lastErr = 'net ' + (code || (e && e.message) || 'unknown').toString().toLowerCase().slice(0, 24);
       o.fails = (o.fails || 0) + 1;
-      // retente vite : un raté réseau ne doit pas figer les chiffres
+      // retry soon: a network miss must not freeze the figures
       o.nextTryAt = now + Math.min(20000 * 2 ** (o.fails - 1), 300000);
       saveOfficialState(o);
     } finally {
@@ -516,7 +516,7 @@ class DataStore {
     return added;
   }
 
-  // Générateur : traite un fichier par étape (l'appelant peut animer entre deux étapes).
+  // Generator: one file per step (the caller can animate between steps).
   *scanSteps() {
     this.lastError = null;
     let files;
@@ -530,7 +530,7 @@ class DataStore {
           this.parseChunk(fs.readFileSync(f.path, 'utf8'));
           this.fileState.set(f.path, { size: f.size, offset: f.size });
         } else if (f.size > st.offset) {
-          // journal en append : ne lire que la fin
+          // append-only log: read the tail only
           const fd = fs.openSync(f.path, 'r');
           try {
             const len = f.size - st.offset;
@@ -540,7 +540,7 @@ class DataStore {
           } finally { fs.closeSync(fd); }
           st.offset = f.size; st.size = f.size;
         } else if (f.size < st.offset) {
-          // fichier réécrit : relire en entier (les entrées se dédupliquent par clé)
+          // file rewritten: read it whole again (entries dedupe by key)
           this.parseChunk(fs.readFileSync(f.path, 'utf8'));
           this.fileState.set(f.path, { size: f.size, offset: f.size });
         }
@@ -553,9 +553,9 @@ class DataStore {
     this.lastScanAt = Date.now();
   }
 
-  scanSync() { for (const _ of this.scanSteps()) { /* tout d'un coup */ } }
+  scanSync() { for (const _ of this.scanSteps()) { /* all at once */ } }
 
-  // ---- agrégats ----
+  // ---- aggregates ----
 
   sorted() {
     return [...this.entries.values()].sort((a, b) => a.ts - b.ts);
@@ -570,7 +570,7 @@ class DataStore {
       a.cost += e.cost; a.val += entryMetric(e, metric); if (e.side) a.side++;
     };
 
-    // Blocs de 5h (ancrés à l'heure pleine UTC du premier message, style ccusage)
+    // 5-hour blocks (anchored to the whole UTC hour of the first message, ccusage style)
     const blocks = [];
     let cur = null;
     for (const e of es) {
@@ -584,35 +584,35 @@ class DataStore {
     }
     const active = blocks.length && now < blocks[blocks.length - 1].end ? blocks[blocks.length - 1] : null;
 
-    // Source de vérité : l'endpoint /usage (mêmes chiffres que l'écran de Claude
-    // Code, bucket Fable compris). Le cache local `vscode-claude-status-cache.json`
-    // n'est utilisé que s'il est PLUS RÉCENT que la dernière réponse API — sur les
-    // postes où l'extension VS Code ne tourne pas, il fige et ment de plusieurs
-    // heures. Par fenêtre, la donnée la plus fraîche gagne ; jamais de mélange.
+    // Source of truth: the /usage endpoint (the same figures as Claude Code
+    // shows, Fable bucket included). The local `vscode-claude-status-cache.json`
+    // cache is only used when it is MORE RECENT than the last API response — on
+    // machines where the VS Code extension is not running it freezes and lies by
+    // hours. Per window, the freshest data wins; never a blend.
     const od = this.official;
     const cacheU = readOfficialUsage(process.env);
-    // Cache : une lecture ratée (fichier en cours de réécriture) ne doit pas faire
-    // disparaître la source — on garde le dernier échantillon lu, il porte sa
-    // propre date et reste soumis à la règle de fraîcheur.
+    // Cache: a failed read (file being rewritten) must not make the source
+    // disappear — we keep the last sample read, it carries its own date and
+    // stays subject to the freshness rule.
     const planRaw = readPlanUsage(process.env, cfg);
     if (planRaw && planRaw.at) this.planCache = planRaw;
     const plan = (planRaw && planRaw.at) ? planRaw : (this.planCache || null);
     const planErr = plan ? null : ((planRaw && planRaw.error) || 'not found');
-    // Un relevé est valable si sa fenêtre court encore, ou s'il est très récent
-    // (les échantillons de l'app n'embarquent pas l'heure de reset).
-    // Règle dure : un relevé de plus de 15 min n'est PLUS considéré comme officiel.
-    // Mieux vaut basculer honnêtement en estimation ≈ que d'afficher un chiffre
-    // périmé avec un point « officiel » — c'est ce qui figeait les jauges.
+    // A reading is valid while its window is still running, or when it is very
+    // recent (the app samples carry no reset time).
+    // Hard rule: a reading older than 15 min is NO LONGER considered official.
+    // Better to fall back honestly to an ≈ estimate than to show a stale figure
+    // with an "official" dot — that is what used to freeze the gauges.
     const MAXAGE = 15 * 60 * 1000;
     const collect = (src, pct, reset, at) =>
       (pct != null && at && now - at < MAXAGE && (!reset || reset > now))
         ? [{ src, pct, reset: reset || 0, at }] : [];
     const best = (arr) => arr.sort((a, b) => b.at - a.at)[0] || null;
 
-    // L'app n'échantillonne que toutes les 5 min : entre deux relevés, le compteur
-    // affiché retarde d'autant. On comble avec la conso réellement observée dans les
-    // transcripts, convertie en points de pourcentage grâce à un facteur calibré sur
-    // l'historique de l'app lui-même (aucune valeur inventée : Δ% mesuré / Δcoût mesuré).
+    // The app only samples every 5 min: between two readings the displayed
+    // counter lags by that much. We fill the gap with the consumption actually
+    // seen in the transcripts, converted into percentage points through a factor
+    // calibrated on the app history itself (nothing invented: measured Δ% / Δcost).
     const costBetween = (t0, t1) => {
       let c = 0;
       for (const e of es) if (e.ts > t0 && e.ts <= t1) c += e.cost;
@@ -625,12 +625,12 @@ class DataStore {
         const a = samples[i - 1], b = samples[i];
         if (typeof a[field] !== 'number' || typeof b[field] !== 'number') continue;
         const dp = b[field] - a[field];
-        if (dp <= 0) continue;                    // reset de fenêtre ou palier : on ignore
+        if (dp <= 0) continue;                    // window reset or plateau: ignore
         const dc = costBetween(a.t, b.t);
         if (dc <= 0) continue;
         dPct += dp; dCost += dc;
       }
-      return dCost > 0 ? dPct / dCost : 0;        // points de % par dollar équivalent
+      return dCost > 0 ? dPct / dCost : 0;        // percentage points per equivalent dollar
     };
     const extrapolate = (sel, field) => {
       if (!sel || sel.src !== 'app' || !plan || !plan.samples) return null;
@@ -651,15 +651,15 @@ class DataStore {
       ...collect('vscode', cacheU && cacheU.u7d, cacheU && cacheU.reset7d, cacheU && cacheU.at),
       ...collect('app', plan && plan.u7d, 0, plan && plan.at),
     ]);
-    // heure de reset : la meilleure connue, même si le pourcentage vient d'ailleurs
+    // reset time: the best one known, even when the percentage comes from elsewhere
     const knownReset = (...v) => v.find((x) => x && x > now) || 0;
     const reset5 = knownReset(s5 && s5.reset, api5 && api5.reset, cacheU && cacheU.reset5h);
     const reset7 = knownReset(s7 && s7.reset, api7 && api7.reset, cacheU && cacheU.reset7d);
 
-    // Fable : seule l'API expose ce compteur. Si l'hebdo a bougé depuis le dernier
-    // relevé Fable, on l'ajuste dans la même proportion (marqué ≈).
-    // même règle de fraîcheur que les autres jauges : un relevé Fable de plusieurs
-    // heures ne doit pas s'afficher comme officiel
+    // Fable: only the API exposes this counter. If the weekly moved since the last
+    // Fable reading, we adjust it in the same proportion (marked ≈).
+    // same freshness rule as the other gauges: a Fable reading hours old must
+    // not be displayed as official
     let offPrem = od.premium && od.premium.reset > now && now - od.fetchedAt < MAXAGE
       ? { ...od.premium } : null;
     let premEstimated = false;
@@ -678,12 +678,12 @@ class DataStore {
     const off5 = off.u5h != null;
     const off7 = off.u7d != null;
 
-    // Fenêtres jour / semaine
+    // Day / week windows
     const midnight = new Date(now); midnight.setHours(0, 0, 0, 0);
     const dayStart = midnight.getTime();
     let weekStart, weekReset = null;
     if (off7 && off.reset7d > now) {
-      // fenêtre hebdo officielle
+      // official weekly window
       weekStart = off.reset7d - D7;
       weekReset = off.reset7d;
     } else if (cfg.weeklyReset && typeof cfg.weeklyReset.weekday === 'number') {
@@ -698,7 +698,7 @@ class DataStore {
       weekStart = now - 7 * 86400 * 1000;
     }
 
-    // Famille premium suivie par la 3e jauge (nom officiel prioritaire)
+    // Premium family tracked by the 3rd gauge (official name wins)
     let premiumFam = cfg.premiumFamily;
     if (offPrem) premiumFam = offPrem.name;
     else if (premiumFam === 'auto') {
@@ -710,7 +710,7 @@ class DataStore {
     const day = zero(), week = zero(), premium = zero(), hour = zero();
     const byFamDay = {};
     const hourAgo = now - 3600 * 1000;
-    const rollStart = now - D7; // fenêtre glissante 7 j — celle de la formule cccat
+    const rollStart = now - D7; // rolling 7-day window — the one the cccat formula uses
     const roll = { prem: 0, tot: 0, premCost: 0, totCost: 0 };
     for (const e of es) {
       if (e.ts >= dayStart) {
@@ -729,14 +729,14 @@ class DataStore {
       if (e.ts >= hourAgo) acc(hour, e);
     }
 
-    // Maxima historiques pour les limites auto — TOUJOURS en coût pondéré, quelle
-    // que soit la métrique d'affichage : les pourcentages estimés sont canoniques
-    // (la touche m ne change que l'unité des chiffres, jamais les %).
+    // Historical maxima for the auto limits — ALWAYS in weighted cost, whatever
+    // the display metric: the estimated percentages are canonical (the m key
+    // only changes the unit of the figures, never the %).
     let maxBlock = 0;
     for (const b of blocks) if (b !== active) maxBlock = Math.max(maxBlock, b.sum.cost);
-    // Semaine glissante max : somme sur fenêtre de 168h par pas d'une heure.
-    // On exclut les 7 derniers jours : seules les périodes révolues calibrent la
-    // limite auto (sinon la fenêtre courante est son propre max → 100 % permanent).
+    // Max rolling week: sum over a 168 h window, stepping one hour at a time.
+    // We exclude the last 7 days: only completed periods calibrate the auto
+    // limit (otherwise the current window is its own max → a permanent 100 %).
     const winCutoff = now - 7 * 86400 * 1000;
     const maxWin = (filter) => {
       const hours = new Map();
@@ -758,33 +758,33 @@ class DataStore {
     const maxWeek = maxWin(null);
     const maxPremium = maxWin((e) => e.fam === premiumFam);
 
-    const floors = { session: 5, week: 40, premium: 20 }; // dollars (éq. API)
-    // Limite auto = pic des périodes révolues, avec 15 % de marge au-dessus de la
-    // fenêtre courante : battre son record affiche ~87 %, jamais un faux 100 %.
+    const floors = { session: 5, week: 40, premium: 20 }; // dollars (API-equivalent)
+    // Auto limit = peak of the completed periods, with 15 % headroom above the
+    // current window: beating your record shows ~87 %, never a fake 100 %.
     const lim = (key, observed, current) => {
       const c = cfg.limits[key];
       if (typeof c === 'number' && c > 0) return { v: c, auto: false };
       return { v: Math.max(observed, (current || 0) * 1.15, floors[key]), auto: true };
     };
 
-    // 3 jauges, alignées sur les limites réelles d'Anthropic : bloc 5h, hebdo
-    // globale, hebdo premium. `official` = pourcentage exact issu de /usage ;
-    // sinon estimation locale vs limite auto (marquée ≈). Pas de jauge "jour" :
-    // cette limite n'existe pas (le total du jour vit dans la ligne de stats).
+    // 3 gauges, aligned with Anthropic's real limits: 5-hour block, global
+    // weekly, premium weekly. `official` = the exact percentage from /usage;
+    // otherwise a local estimate against the auto limit (marked ≈). No "day"
+    // gauge: that limit does not exist (the daily total lives in the stats line).
     const meters = [];
     const push = (key, label, used, usedCost, tokens, limit, resetSec, resetText, official) => {
       meters.push({
         key, label, used, tokens,
-        limit: official ? null : limit.v,       // dollars (éq. API)
+        limit: official ? null : limit.v,       // dollars (API-equivalent)
         auto: official ? false : limit.auto,
         official: !!official,
         pct: official ? official.pct : (limit.v > 0 ? (usedCost / limit.v) * 100 : 0),
         resetSec, resetText,
       });
     };
-    // RÈGLE : sans relevé officiel frais, on n'invente RIEN — pct = null, la jauge
-    // affiche « — ». Un pourcentage calculé sur des pics historiques n'a aucun
-    // rapport avec les quotas réels et induit en erreur.
+    // RULE: with no fresh official reading we invent NOTHING — pct = null, the
+    // gauge shows "—". A percentage computed from historical peaks bears no
+    // relation to the real quotas and misleads.
     const unknown = (key, label, used, tokens, resetSec) => meters.push({
       key, label, used, tokens, limit: null, auto: false, official: false,
       pct: null, resetSec, resetText: null,
@@ -794,23 +794,23 @@ class DataStore {
     const estBlockTok = active ? active.sum.i + active.sum.o + active.sum.cw + active.sum.cr : 0;
     const ex5 = extrapolate(s5, 'fh'), ex7 = extrapolate(s7, 'sd');
 
-    // Coût premium consommé entre deux instants (transcripts locaux).
+    // Premium cost consumed between two instants (local transcripts).
     const premCostBetween = (t0, t1) => {
       let c = 0;
       for (const e of es) if (e.fam === premiumFam && e.ts > t0 && e.ts <= t1) c += e.cost;
       return c;
     };
-    // API muette depuis un moment (token périmé, réseau) : on repart du DERNIER
-    // pourcentage officiel du bucket et on le fait bouger comme l'hebdo globale,
-    // qui, elle, continue d'être rafraîchie par le fichier de l'app. On ne le
-    // bouge que si les transcripts montrent de la conso premium depuis ce relevé :
-    // passer sur un autre modèle ne doit pas faire monter la jauge premium.
+    // API silent for a while (expired token, network): we start again from the
+    // LAST official percentage of the bucket and move it like the global weekly,
+    // which the app file keeps refreshing. We only move it when the transcripts
+    // show premium consumption since that reading: switching to another model
+    // must not push the premium gauge up.
     //
-    // L'ancienne règle de trois — pourcentage officiel × (coût premium sur 7 j
-    // glissants maintenant / au moment du relevé) — explosait : sa base n'a rien
-    // à voir avec le quota (fenêtre glissante contre fenêtre à reset fixe, et
-    // les transcripts ne voient que CE poste). Mesuré ici : 85 % × 1,3 = 100 %
-    // affiché pour 86 % réels, alors que l'hebdo n'avait bougé que de 68 à 69 %.
+    // The old rule of three — official percentage × (premium cost over a rolling
+    // 7 days now / at the time of the reading) — blew up: its base has nothing
+    // to do with the quota (rolling window against a fixed-reset window, and the
+    // transcripts only see THIS machine). Measured here: 85 % × 1.3 = 100 %
+    // displayed for a real 86 %, while the weekly had only moved from 68 to 69 %.
     let anchorPrem = null;
     if (!offPrem && od.premium && od.premium.reset > now && od.premium.pct > 0 && od.fetchedAt > 0) {
       anchorPrem = od.premium.pct * 100;
@@ -834,7 +834,7 @@ class DataStore {
     }
     const premTok = premium.i + premium.o + premium.cw + premium.cr;
     if (offPrem) {
-      // bucket officiel weekly_scoped (Fable/Opus) — la vraie valeur de /usage
+      // official weekly_scoped bucket (Fable/Opus) — the real /usage value
       meters.push({
         key: 'premium', label: premiumFam.toUpperCase() + ' 7d',
         used: premium.val, tokens: premTok, limit: null, auto: premEstimated,
@@ -842,20 +842,20 @@ class DataStore {
         resetSec: (offPrem.reset - now) / 1000, resetText: null,
       });
     } else if (anchorPrem != null) {
-      // Ancrage sur le dernier relevé officiel du bucket premium, même ancien :
-      // il donne le quota en coût (quota = coût_premium_à_T / pourcentage_à_T),
-      // puis on applique le coût premium consommé sur 7 j glissants aujourd'hui.
-      // Insensible au changement de modèle : si tu passes sur Opus, la conso
-      // premium stagne et la jauge ne bouge pas, contrairement à une règle de
-      // trois sur l'hebdo globale.
+      // Anchored on the last official reading of the premium bucket, however old:
+      // it gives the quota in cost (quota = premium_cost_at_T / percentage_at_T),
+      // then we apply the premium cost consumed over a rolling 7 days today.
+      // Immune to a model switch: move to Opus and the premium consumption
+      // flatlines, so the gauge stays put, unlike a rule of three on the global
+      // weekly.
       meters.push({
         key: 'premium', label: premiumFam.toUpperCase() + ' 7d',
         used: premium.val, tokens: premTok, limit: null, auto: true, official: false,
         pct: anchorPrem, resetSec: reset7 ? (reset7 - now) / 1000 : null, resetText: null,
       });
     } else if (off7 && roll.tot > 0) {
-      // Sans relevé officiel premium : repli sur la formule cccat, en coût pondéré
-      // (un token Fable pèse ~2x un token Opus dans le quota).
+      // With no official premium reading: fall back to the cccat formula, in
+      // weighted cost (a Fable token weighs ~2x an Opus token in the quota).
       const share = cfg.premiumShare > 0 ? cfg.premiumShare : 0.5;
       const pct = Math.min(100, ((roll.premCost / roll.totCost) * off.u7d / share) * 100);
       meters.push({
@@ -868,7 +868,7 @@ class DataStore {
         reset7 ? (reset7 - now) / 1000 : null);
     }
 
-    // Débit et projection de fin de bloc (canoniques en coût, comme les %)
+    // Burn rate and end-of-block projection (canonical in cost, like the %)
     const burnPerMin = hour.val / 60;
     const burnCostPerMin = hour.cost / 60;
     const burnTokPerMin = (hour.i + hour.o + hour.cw + hour.cr) / 60;
@@ -877,7 +877,7 @@ class DataStore {
     if (active) {
       const remainMin = ((off5 ? off.reset5h : active.end) - now) / 60000;
       if (sess.official && estBlockCost > 0) {
-        // règle de trois sur le pourcentage officiel, au rythme de dépense actuel
+        // rule of three on the official percentage, at the current spend rate
         projPct = sess.pct * (1 + (burnCostPerMin * Math.max(0, remainMin)) / estBlockCost);
       } else if (!sess.official && sess.limit > 0) {
         projPct = ((estBlockCost + burnCostPerMin * Math.max(0, remainMin)) / sess.limit) * 100;
@@ -889,8 +889,8 @@ class DataStore {
       burnPerMin, burnTokPerMin, projPct,
       day, byFamDay,
       officialAt: off.at,
-      // diagnostic affiché à l'écran quand aucune source ne répond : c'est ce que
-      // CE process voit, pas ce qu'un autre terminal verrait.
+      // diagnostics shown on screen when no source answers: this is what THIS
+      // process sees, not what another terminal would see.
       diag: (off5 || off7) ? null : (() => {
         const lines = [];
         for (const p of planUsageFiles(process.env, cfg)) {
