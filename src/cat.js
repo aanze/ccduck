@@ -667,8 +667,12 @@ function groomFrame(g, t) {
 }
 
 const TOWER_W = 10;
-// Where the tower stands: pinned to the LEFT edge of the floor.
-function towerBaseX() { return 2; }
+// Where the tower stands: near the LEFT edge of the floor, but not against it.
+// The sleeping cat is 16 px wide against a 10 px platform, so centring it puts
+// its left edge 3 px left of the tower's — at 2 that landed off screen and the
+// cat was clamped to 0, losing its left side and sitting off-centre on its own
+// platform.
+function towerBaseX() { return 6; }
 // Tower height in pixels, adapted to the canvas height (H = rows*2): tall
 // terminals get a tall tower. Chosen so the sleeping cat always overflows by
 // the same 2 rows, which the ui reserves (the bubble + marker lines).
