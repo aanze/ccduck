@@ -1,6 +1,6 @@
 {
   "name": "ccduck",
-  "version": "1.15.1",
+  "version": "1.15.2",
   "description": "Claude Code token monitor for the terminal, with a pixel-art debug duck",
   "repository": {
     "type": "git",

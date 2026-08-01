@@ -1,0 +1,10 @@
+# Normalise text files to LF inside the repository (the working tree keeps the
+# platform's own convention).
+* text=auto
+
+# The launcher must keep LF everywhere, on every platform: a CRLF shebang makes
+# macOS and Linux fail with `env: node\r: No such file or directory`.
+bin/ccduck.js text eol=lf
+
+# Packaged releases are binary, never touch them.
+*.tgz binary

@@ -65,7 +65,7 @@ A ready-to-use npm package sits in [`dist/`](dist/) (and is attached to GitHub R
 Download the `.tgz`, then:
 
 ```bash
-npm install -g ./ccduck-1.15.1.tgz
+npm install -g ./ccduck-1.15.2.tgz
 ```
 
 (Frozen copy: to update, reinstall the next version's `.tgz`.)
@@ -258,6 +258,18 @@ Optional file, to be created in your home folder. Everything in it is optional:
 | `autoReauth` | `false` by default: at `true`, ccduck renews the expired OAuth token itself (the `a` key, [details](#auto-reauth--the-a-key)) |
 
 ## Troubleshooting
+
+**`permission denied` on macOS or Linux** → the launcher needs its executable bit. It is
+set in the repository since v1.15.2, so a fresh clone or a `git pull` is enough; on an
+older clone, set it by hand:
+
+```bash
+chmod +x bin/ccduck.js
+```
+
+`npm install -g .` sets it too, which is why the problem only shows up when running
+`./bin/ccduck.js` straight from the clone. Running it through node never needs it:
+`node bin/ccduck.js`.
 
 **“I pulled but I'm not getting the right numbers”** → check `ccduck --version` first: a
 `git pull` only updates the command when the install came from **clone +
