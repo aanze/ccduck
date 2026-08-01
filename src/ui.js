@@ -55,19 +55,28 @@ const RANK = { zen: 0, calm: 1, alert: 2, panic: 3 };
 function metersGeometry(snap, cols, cfg) {
   const L = meterLayout(cols);
   let worst = null;
+  const alerts = [];
   const tips = snap.meters.map((m, idx) => {
     const pct = Math.max(0, m.pct == null ? 0 : m.pct);
     const fill = Math.min(1, pct / 100) * L.barW;
     const tip = L.barX0 + Math.max(0, Math.min(L.barW - 1, Math.floor(fill)));
     let eff = levelOf(pct, cfg);
     if (m.key === 'premium' && eff === 'panic') eff = 'alert';
-    if (!worst || RANK[eff] > RANK[worst.eff] || (RANK[eff] === RANK[worst.eff] && pct > worst.pct)) {
-      worst = { pct, tip, label: m.label, idx, eff, key: m.key };
-    }
+    const e = { pct, tip, label: m.label, idx, eff, key: m.key };
+    if (RANK[eff] >= RANK.alert) alerts.push(e);
+    // À gravité égale, une jauge premium s'efface : sa panique est volontairement
+    // adoucie (les autres modèles restent utilisables), elle ne doit pas masquer
+    // une limite globale qui, elle, bloquera tout.
+    const better = !worst || RANK[eff] > RANK[worst.eff]
+      || (RANK[eff] === RANK[worst.eff] && worst.key === 'premium' && m.key !== 'premium')
+      || (RANK[eff] === RANK[worst.eff] && (worst.key === 'premium') === (m.key === 'premium') && pct > worst.pct);
+    if (better) worst = e;
     return tip;
   });
+  // les plus graves d'abord : c'est l'ordre dans lequel le canard les traite
+  alerts.sort((a, b) => (RANK[b.eff] - RANK[a.eff]) || (b.pct - a.pct));
   return {
-    L, tips, worst,
+    L, tips, worst, alerts,
     level: worst ? worst.eff : 'calm',
     soft: !!(worst && worst.key === 'premium'),
   };
@@ -348,15 +357,15 @@ function draw(scr, state) {
 
   // ---- indicateur + canard ----
   const indY = y, bubbleY = y + 1, canvasTop = y + 2;
-  if (geo.worst && geo.worst.pct >= cfg.alert) {
-    const col = pctColor(geo.worst.pct, cfg);
-    const show = geo.worst.pct >= cfg.panic ? blinkOn : true;
-    if (show) scr.set(geo.worst.tip, indY, '▲', col, null, A_BOLD);
+  // une pointe par jauge en alerte, pas seulement la pire : quand plusieurs
+  // limites approchent, elles doivent toutes se voir
+  for (const a of geo.alerts) {
+    const col = pctColor(a.pct, cfg);
+    const show = a.eff === 'panic' ? blinkOn : true;   // seule une vraie panique clignote
+    if (show) scr.set(a.tip, indY, '▲', col, null, A_BOLD);
     // pointillés entre la pointe et le canard quand il est dessous
     const duckCx = state.duckInfo.x + SPR_W / 2;
-    if (Math.abs(duckCx - geo.worst.tip) < 3 && geo.worst.pct >= cfg.panic && blinkOn) {
-      scr.set(geo.worst.tip, bubbleY, '¦', col);
-    }
+    if (Math.abs(duckCx - a.tip) < 3 && a.eff === 'panic' && blinkOn) scr.set(a.tip, bubbleY, '¦', col);
   }
   drawBubble(scr, bubbleY, state.duckInfo, state.bubble, blinkOn);
   // Pillage : il sort de l'eau pour aller cogner la barre. On agrandit la zone

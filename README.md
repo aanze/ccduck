@@ -14,9 +14,13 @@ jaune en pixel art qui vit sa vie sur l'eau… et panique quand tes limites appr
   et ne s'exprime qu'en onomatopées (« quack », « zzz… ») — seuls les avertissements de
   limites ont droit à du texte. Dès qu'une jauge passe **70 %**, elle court se placer sous la pointe de la jauge
   fautive et la pointe de l'aile ; à **90 %** c'est la **panique** — par phases de 20-30 s,
-  entrecoupées d'un tour du bassin ponctué de « quack », puis ça repart. Exception : la
-  jauge premium (FABLE/OPUS) ne déclenche qu'une **alerte douce**, jamais la panique —
-  les autres modèles restent utilisables. Touche `f` pour
+  entrecoupées d'un tour du bassin ponctué de « quack », puis ça repart. **Plusieurs
+  jauges au-dessus du seuil sont traitées à tour de rôle**, une par phase de pointage, et
+  une pointe `▲` marque chacune d'elles. Exception : la jauge premium (FABLE/OPUS) ne
+  déclenche qu'une **alerte douce**, jamais la panique — les autres modèles restent
+  utilisables — et à gravité égale elle s'efface devant une limite globale, qui, elle,
+  bloquera tout. Une vraie panique monopolise le cycle : ce n'est plus le moment de faire
+  la tournée. Touche `f` pour
   lui **jeter des graines** : elle accourt (même en pleine panique), picore un moment
   (« nom nom nom »), puis retourne à ses occupations — les graines restantes flottent
   pour plus tard. Touche `s` pour lâcher une **gélule sédative** bicolore : elle la prend
@@ -63,7 +67,7 @@ Un paquet npm prêt à l'emploi est fourni dans [`dist/`](dist/) (et attaché au
 Releases GitHub). Télécharger le `.tgz` puis :
 
 ```bash
-npm install -g ./ccduck-1.14.3.tgz
+npm install -g ./ccduck-1.15.0.tgz
 ```
 
 (Copie figée : pour mettre à jour, réinstaller le `.tgz` de la version suivante.)

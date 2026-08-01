@@ -321,6 +321,8 @@ async function run(argv) {
       worstPct: geo.worst ? geo.worst.pct : 0,
       soft: geo.soft,
       canvasW: cols,
+      // toutes les jauges en alerte, pas seulement la pire : il les traite à tour de rôle
+      alerts: geo.alerts.map((a) => ({ tip: a.tip, label: a.label.replace(/ .*/, ''), pct: a.pct, eff: a.eff })),
       // géométrie des barres : ce qu'il lui faut pour aller les grignoter
       bars: { x0: geo.L.barX0, tips: geo.tips },
     });

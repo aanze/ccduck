@@ -428,7 +428,8 @@ class Duck {
     this.mode = 'calm';
     this.frame = 'stand';
     this.act = null;            // activité tranquille en cours {name, until, x, speed}
-    this.phase = null;          // cycle alerte/panique {name:'point'|'break', until}
+    this.phase = null;          // cycle alerte/panique {name:'point'|'break', until, tgt}
+    this.alertIdx = 0;          // tourniquet entre les jauges en alerte
     this.blinkUntil = 0;
     this.bubble = null;         // {text, until, style}
     this.nextBubbleAt = 0;
@@ -797,6 +798,20 @@ class Duck {
     });
   }
 
+  // Jauge que le canard va prendre en charge pour cette phase de pointage.
+  // Plusieurs limites peuvent monter en même temps : il les traite à tour de
+  // rôle plutôt que de s'acharner sur la plus haute. Une vraie panique (hors
+  // premium, dont l'alerte est volontairement adoucie) garde la priorité et
+  // monopolise le cycle — c'est l'urgence, pas le moment de faire la tournée.
+  pickAlert(ctx) {
+    const list = ctx.alerts;
+    if (!Array.isArray(list) || !list.length) return null;
+    const panics = list.filter((a) => a.eff === 'panic');
+    const pool = panics.length ? panics : list;
+    this.alertIdx = (this.alertIdx + 1) % pool.length;
+    return pool[this.alertIdx];
+  }
+
   // Niveau de faim, en paliers de HUNGRY_AFTER : 0 = repu, 1 = il réclame,
   // 2 = il insiste, 3 et plus = il crève la dalle et se sert tout seul.
   hungerLevel() {
@@ -1003,7 +1018,6 @@ class Duck {
     this.maybeJoy();
     this.maybeRaid(ctx.bars);
 
-    const target = Math.max(minX, Math.min(maxX, (ctx.targetX || ctx.canvasW / 2) - SPR_W / 2));
     const busy = ctx.mode === 'alert' || ctx.mode === 'panic';
 
     if (this.tryFeeding(dt, minX, maxX)) {
@@ -1021,17 +1035,21 @@ class Duck {
       const isPanic = ctx.mode === 'panic';
       const pointDur = () => isPanic ? rand(20, 30) : ctx.soft ? rand(9, 15) : rand(15, 25);
       const breakDur = () => isPanic ? rand(8, 14) : ctx.soft ? rand(14, 22) : rand(10, 18);
-      if (!this.phase) this.phase = { name: 'point', until: t + pointDur() };
+      if (!this.phase) this.phase = { name: 'point', until: t + pointDur(), tgt: this.pickAlert(ctx) };
       if (t > this.phase.until) {
         if (this.phase.name === 'point') {
           this.phase = { name: 'break', until: t + breakDur() };
           this.act = null;
         } else {
-          this.phase = { name: 'point', until: t + pointDur() };
+          // chaque phase de pointage s'occupe de la jauge suivante : deux limites
+          // qui montent en même temps sont signalées l'une après l'autre
+          this.phase = { name: 'point', until: t + pointDur(), tgt: this.pickAlert(ctx) };
           if (isPanic) this.say('QUACK !!', 'panic', 1.6);
           this.nextBubbleAt = t + 1;
         }
       }
+      const tgt = this.phase.tgt || { tip: ctx.targetX, label: ctx.worstLabel, pct: ctx.worstPct };
+      const target = Math.max(minX, Math.min(maxX, (tgt.tip != null ? tgt.tip : ctx.canvasW / 2) - SPR_W / 2));
       if (this.phase.name === 'break') {
         // le tour du bassin, l'air de rien
         this.runIdleLife(dt, 'calm', minX, maxX, true);
@@ -1039,7 +1057,7 @@ class Duck {
         this.moveToward(target + Math.sin(t * 11) * 3, 24, dt, minX, maxX);
         this.frame = (Math.floor(t / 0.12) % 2 === 0) ? 'panicA' : 'panicB';
         if (t > this.nextBubbleAt) {
-          this.say(pick([`!! ${ctx.worstLabel} ${Math.round(ctx.worstPct)}% !!`, 'QUACK QUACK !!']), 'panic', 1.8);
+          this.say(pick([`!! ${tgt.label} ${Math.round(tgt.pct)}% !!`, 'QUACK QUACK !!']), 'panic', 1.8);
           this.nextBubbleAt = t + rand(2, 3.2);
         }
         if (Math.random() < dt * 10) this.spawn({
@@ -1055,7 +1073,7 @@ class Duck {
         this.frame = moving ? 'stand' : (Math.floor(t / 0.32) % 2 === 0) ? 'lookA' : 'lookB';
         if (!moving && Math.random() < dt / 1.6) this.hop = 2.4;
         if (t > this.nextBubbleAt) {
-          this.say(`${ctx.worstLabel} at ${Math.round(ctx.worstPct)}% !`, 'alert', 3);
+          this.say(`${tgt.label} at ${Math.round(tgt.pct)}% !`, 'alert', 3);
           this.nextBubbleAt = t + rand(4.5, 7);
         }
       }
