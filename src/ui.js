@@ -4,6 +4,7 @@
 
 const { A_BOLD, A_REV, A_DIM } = require('./ansi');
 const { SPR_W, SPR_H, PAL, SEED, PILL_A, PILL_B, POOP, POOP_TOP, POOP_OLD, POOP_LIFE, CURRENT, BITE_REGEN } = require('./duck');
+const { TOWER_W, towerBaseX, towerPx } = require('./cat');
 const { fmtMetric, fmtTok, fmtDur, fmtClock, fmtPct, clip, padR, padL, fmtCost } = require('./format');
 
 const C = {
@@ -165,6 +166,24 @@ function drawCanvas(scr, top, rowsN, duckInfo, t, lift) {
   const px = new Int32Array(W * H).fill(-1);
   const baseY = H - SPR_H;
   const { rows, mirror, x, yOff } = duckInfo;
+  const innerH = rowsN * 2;   // height of the pond itself, without the lift rows
+  // cat mode: the tower stands as scenery on the right — drawn first, so the
+  // cat and everything else passes in front of it
+  if (duckInfo.pet === 'cat') {
+    const tp = towerPx(innerH);
+    const tx = towerBaseX(W);
+    const y0 = H - tp;
+    const put = (X, Y, c) => { if (X >= 0 && X < W && Y >= 0 && Y < H) px[Y * W + X] = c; };
+    // top platform (2 px thick), central post, feet
+    for (let X = tx; X < tx + TOWER_W; X++) { put(X, y0, PAL.N); put(X, y0 + 1, PAL.n); }
+    for (let Y = y0 + 2; Y < H; Y++) { put(tx + 4, Y, PAL.n); put(tx + 5, Y, PAL.n); }
+    for (let X = tx + 2; X < tx + TOWER_W - 2; X++) put(X, H - 1, PAL.N);
+  }
+  // the fly, one grey pixel buzzing about (its jitter is its wings)
+  if (duckInfo.fly) {
+    const fx = Math.round(duckInfo.fly.x), fy = baseY + Math.round(duckInfo.fly.y);
+    if (fx >= 0 && fx < W && fy >= 0 && fy < H) px[fy * W + fx] = 0xB9BEC7;
+  }
   // seeds (under the duck: it swims over them and pecks them)
   for (const s of duckInfo.seeds || []) {
     const sx = Math.round(s.x), sy = baseY + Math.round(s.y);
@@ -247,7 +266,14 @@ function drawRain(scr, top, rowsN, waterY, strength, t) {
   }
 }
 
-function drawWater(scr, y, t, duckX) {
+function drawWater(scr, y, t, duckX, pet) {
+  // the cat lives on dry land: a plain floor instead of the pond
+  if (pet === 'cat') {
+    for (let x = 0; x < scr.cols; x++) {
+      scr.set(x, y, '▁', (x % 7 === 3) ? 0x7A8B5A : 0x565B63, null, A_DIM);
+    }
+    return;
+  }
   for (let x = 0; x < scr.cols; x++) {
     const phase = (x + Math.floor(t * CURRENT)) % 8;
     const near = Math.abs(x - (duckX + SPR_W / 2)) < 4;
@@ -380,9 +406,16 @@ function draw(scr, state) {
     lift = Math.max(0, headRow - (metersTop + peck.m));
     duckInfo = { ...duckInfo, yOff: duckInfo.yOff - Math.round(peck.reach * lift * 2) };
   }
+  // cat on its tower: lift it to the platform (the tower height adapts to the
+  // canvas so the overflow is always 2 rows — the bubble and marker lines)
+  if (duckInfo.towerLift > 0) {
+    const tp = towerPx(canvasRows * 2);
+    duckInfo = { ...duckInfo, yOff: duckInfo.yOff - Math.round(duckInfo.towerLift * (tp - 1)) };
+    lift = Math.max(lift, 2);
+  }
   drawCanvas(scr, canvasTop, canvasRows, duckInfo, tSec, lift);
   const waterY = canvasTop + canvasRows;
-  drawWater(scr, waterY, tSec, state.duckInfo.x);
+  drawWater(scr, waterY, tSec, state.duckInfo.x, state.duckInfo.pet);
   drawRain(scr, canvasTop, canvasRows, waterY, state.duckInfo.rain || 0, tSec);
   // crumbs torn off the bars: they fall from the gauge down to the pond,
   // where the seed physics takes over (and where it pecks them)
@@ -441,6 +474,7 @@ function draw(scr, state) {
     scr.text(1, fy, clip('⚠ ' + snap.lastError, cols - 2), C.red);
   } else {
     const keys = '[q]uit [f]eed [s]edate [r]efresh [m]etric:' + ui.metricLabel + ' [c]table [d]emo'
+      + ' [x]pet:' + (state.duckInfo.pet === 'cat' ? 'cat' : 'duck')
       + ' [a]uth:' + (cfg.autoReauth ? 'auto' : 'off') + (ui.paused ? ' ▮▮' : '');
     const bits = [];
     // the source actually kept: app (local Claude file), api, or VS Code cache

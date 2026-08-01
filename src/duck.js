@@ -12,15 +12,24 @@
 //    regular intervals, until someone feeds it
 
 const PAL = {
-  Y: 0xFFD21E, // body
-  H: 0xFFE97A, // highlight
-  y: 0xD99E00, // shadow / wing
+  Y: 0xFFD21E, // duck body
+  H: 0xFFE97A, // duck highlight
+  y: 0xD99E00, // duck shadow / wing
   O: 0xFF8A00, // beak
   o: 0xC96A00, // beak shadow
   K: 0x26200F, // eye
   W: 0xFFFFFF,
+  w: 0xC9CCD1, // dim white (cat paws in shadow)
   R: 0xFF5555,
+  M: 0xA67C52, // cat brown — picked to land on (175,135,95) in the 256 cube
+  m: 0x7B4B24, // cat dark brown — lands on (135,95,0), a real brown
+  P: 0xF2A6A6, // cat nose / mouth
+  T: 0xC79774, // cat light tan — belly and inner paws; lands on (215,175,135)
+  p: 0xC8837D, // cat muzzle, a dimmer pink than P; lands on (215,135,135)
+  N: 0xC7A87F, // cat tower wood
+  n: 0x9A7B54, // cat tower wood, dark
 };
+const { SPR_CAT, cycleFrame, groomPlan, groomFrame, towerCatX } = require('./cat');
 
 const SEED = 0xD9B44A;
 const PILL_A = 0xFF5A5A; // two-tone pill
@@ -379,7 +388,8 @@ const POSED = new Set(['dabble', 'preen', 'sleep', 'gaze']);
 // we do not overlay the dropping pose on it.
 const POSE_FRAMES = new Set(['dabble', 'preen', 'sleep', 'front', 'frontBlink', 'frontQuack',
   'panicA', 'panicB', 'poopA', 'poopB', 'begA', 'begB', 'billUp',
-  'raidLow', 'raidFlapUp', 'raidFlapMid', 'raidFlapDown']);
+  'raidLow', 'raidFlapUp', 'raidFlapMid', 'raidFlapDown',
+  'stalkA', 'stalkB', 'wiggleA', 'wiggleB', 'leap', 'land']);
 
 // Weather: the occasional shower, rare and long. It changes nothing about the
 // figures, only the mood — and the duck's.
@@ -404,11 +414,24 @@ const STARVING = 3;            // step from which it starts attacking the bars
 const RAID_EVERY = [40, 80];   // and it comes back regularly while still hungry
 const RAID_LEN = [4, 7];
 const RAID_UP = 0.18, RAID_HOLD = 0.12, RAID_DOWN = 0.3;   // spring, impact, fall back
+const CAT_LEAP = 0.42;   // how long the cat spends in the air on a pounce
 const RAID_FLAP = ['raidFlapUp', 'raidFlapMid', 'raidFlapDown', 'raidFlapMid'];
+const CAT_RAID_FLAP = ['raidFlapUp', 'raidLow'];
+// The zoomies: every few minutes the cat decides something is there, and hunts
+// it. Nothing is there. It reuses the whole fly-chase machinery, aimed at a
+// target the renderer is told not to draw — which is exactly what the thing
+// looks like from the outside.
+const ZOOM_EVERY = [150, 300];   // one fit every 2.5 to 5 min
+const ZOOM_LEN = [7, 13];        // long enough for two or three pounces
 const BITE_REGEN = 240;        // a nibbled bar takes 4 min to close up
 // Picture bubble: seeds and a question mark, not a sentence — words stay
 // reserved for limit warnings.
 const BEGS = ['∵ ?', 'QUACK ! ∵', '∵ ∵ ∵ !!'];
+
+// Purring has no duck counterpart, so it cannot come from translating a quack:
+// a duck has nothing to say while preening, whereas a cat washing itself is the
+// most purring thing there is. Hence its own list, said only by the cat.
+const PURRS = ['purrr', 'prrrr…', 'purr purr', 'prrr ♥'];
 
 function rand(a, b) { return a + Math.random() * (b - a); }
 function pick(arr) { return arr[Math.floor(Math.random() * arr.length)]; }
@@ -457,13 +480,39 @@ class Duck {
     this.eatT = 0;
     this.hop = 0;
     this.t = 0;
+    this.pet = 'duck';          // 'duck' | 'cat' — same engine, different drawings
+    this.moving = false;        // true while it actually moved this tick (walk frames)
+    this.tower = null;          // cat only: {phase:'up'|'on'|'down', t0} — nap on the tower
+    this.fly = null;            // cat only: {x, y, vx, vy} — the fly it will never catch
+    this.groom = null;          // cat only: see groomPlan — one full washing routine
+    this.nextZoomAt = rand(ZOOM_EVERY[0], ZOOM_EVERY[1]);   // cat only: the zoomies
   }
 
   say(text, style, durSec) {
+    // the cat speaks cat: same sentences, translated at the last moment so the
+    // behaviour code stays pet-agnostic
+    if (this.pet === 'cat') {
+      text = text.replace(/QUACK/g, 'MEOW').replace(/quack/g, 'meow')
+        .replace(/wak wak/g, 'mrrrow').replace(/squeak/g, 'prrr');
+    }
     this.bubble = { text, style: style || 'calm', until: this.t + (durSec || 2.5) };
   }
 
-  spawn(p) { this.particles.push({ grav: 1, rel: true, ...p }); }
+  // Grooming and dozing: the cat purrs, the duck says nothing. Kept quiet enough
+  // that it stays a punctuation and not a running commentary.
+  maybePurr() {
+    if (this.pet !== 'cat' || this.bubble) return;
+    if (Math.random() < 0.35) this.say(pick(PURRS), 'calm', 2.4);
+  }
+
+  // The cat is on dry land. Every water effect the pond code emits — the wake it
+  // trails while moving, the splashes when it lands or forages, the droplets —
+  // is dropped here rather than special-cased at each of the dozen call sites,
+  // which is also what keeps a future one from reintroducing them.
+  spawn(p) {
+    if (this.pet === 'cat' && p.fg === WATER) return;
+    this.particles.push({ grav: 1, rel: true, ...p });
+  }
 
   // Throws a handful of seeds at a random spot in the pond.
   feed(atX) {
@@ -515,6 +564,14 @@ class Duck {
     } else {
       weights = [['swim', 34], ['drift', 16], ['dabble', 14], ['preen', 10], ['quack', 10], ['sleep', 6]];
     }
+    // A cat naps more than a duck — that is the whole point of being a cat. And
+    // it grooms far less often than the duck dabbles and preens, because for a
+    // cat both names expand to one 16 s routine instead of a two-second dip:
+    // left at the duck's weights it would spend 43% of its life washing.
+    if (this.pet === 'cat' && !breakMode) {
+      weights = weights.map(([n, w]) => [n,
+        n === 'sleep' ? w * 2 : (n === 'dabble' || n === 'preen') ? Math.max(2, Math.round(w * 0.3)) : w]);
+    }
     // the camera stare only comes AFTER a stroll: it stops, turns around, stares
     // at us, blinks, lets out a QUACK, then goes back to its business
     if (!breakMode && (this.lastAct === 'swim' || this.lastAct === 'drift')) {
@@ -534,12 +591,23 @@ class Duck {
       // on a panic break: long crossings (the "lap around the pond")
       a.x = breakMode ? (this.x > (minX + maxX) / 2 ? rand(minX, minX + 6) : rand(maxX - 6, maxX)) : rand(minX, maxX);
       a.speed = breakMode ? rand(7, 11) : rand(4, 9);
+      // a cat saunters, it does not paddle: slower, and it stops to think
+      if (this.pet === 'cat') { a.speed *= 0.55; a.until = t + rand(4, 9); }
       a.until = t + rand(3, 7);
     } else if (name === 'drift') { a.x = this.x + rand(-6, 6); a.speed = 1.2; a.until = t + rand(3, 7); }
-    else if (name === 'dabble') { a.until = t + rand(1.6, 3); }
-    else if (name === 'preen') { a.until = t + rand(1.8, 3.2); }
+    else if (name === 'dabble' || name === 'preen') {
+      a.until = t + (name === 'dabble' ? rand(1.6, 3) : rand(1.8, 3.2));
+      // the cat neither dabbles nor preens: both stand for one grooming session,
+      // which runs far longer than the duck's quick dip and drives its own frames
+      if (this.pet === 'cat' && !this.feeding) {
+        this.groom = groomPlan(t);
+        a.until = this.groom.until;
+        a.speed = 0;                      // it stays put for the whole routine
+      }
+      this.maybePurr();
+    }
     // real naps: up to 1 min when everything is green, 30 s otherwise
-    else if (name === 'sleep') { a.until = t + (mode === 'zen' ? rand(6, 60) : rand(3.5, 30)); }
+    else if (name === 'sleep') { a.until = t + (mode === 'zen' ? rand(6, 60) : rand(3.5, 30)); this.maybePurr(); }
     else if (name === 'quack') {
       a.until = t + 0.8;
       // including during alert/panic laps: the occasional quack
@@ -588,6 +656,28 @@ class Duck {
     } else if (a.name === 'preen') {
       this.frame = 'preen';
     } else if (a.name === 'sleep') {
+      if (this.pet === 'cat') {
+        // A cat does not sleep just anywhere: it walks to the tower, jumps on
+        // top, curls up. The ui lifts the sprite to the platform (this.tower).
+        const twx = towerCatX(this.canvasW);
+        if (!a.at) {
+          this.frame = 'stand';
+          // the platform overhangs the usual bounds: widen them for this trip
+          if (!this.moveToward(twx, 9, dt, Math.min(minX, twx), Math.max(maxX, twx))) a.at = t;
+          return;
+        }
+        this.x = twx;                 // no drifting while up there
+        this.dir = -1;
+        const e = t - a.at;
+        // it gathers itself under the tower — rear wiggling — then leaps
+        if (e < 0.45) { this.frame = Math.floor(t / 0.12) % 2 === 0 ? 'wiggleA' : 'wiggleB'; return; }
+        if (!this.tower) this.tower = { phase: 'up', t0: t };          // leap!
+        if (this.tower.phase === 'up') {
+          this.frame = 'leap';
+          if (t - this.tower.t0 >= 0.28) this.tower = { phase: 'on', t0: t };
+          else return;
+        }
+      }
       this.frame = 'sleep';
       if (Math.random() < dt * 0.9) this.spawn({
         x: this.headX(), y: 1, vx: 1.2, vy: -1.4, ch: 'z', fg: 0x9AA0A6, life: 1.8, grav: 0,
@@ -627,6 +717,7 @@ class Duck {
   // It takes the pose (tail up) before getting on with it — see runPoopPose.
   maybePoop() {
     const t = this.t;
+    if (this.pet === 'cat') return;          // a cat buries it, off screen
     if (this.poopPose || this.eaten <= 0 || t < this.nextPoopAt) return;
     // never on top of another pose: the appointment is not consumed, it will
     // happen as soon as it is back to a normal stance
@@ -693,6 +784,50 @@ class Duck {
     return Math.max(0, Math.min(1, (t - this.rain.since) / 4, (this.rain.until - t) / 4));
   }
 
+  // Cat mode: the weather timer brings a FLY instead of rain — one erratic dot
+  // buzzing over the pond, which the cat will chase and never catch.
+  updateFly(dt) {
+    // a ghost target belongs to the zoomies, which owns its lifetime: it has no
+    // flight of its own, it only ever moves when the cat lunges through it
+    if (this.fly && this.fly.ghost) return;
+    if (this.pet !== 'cat' || !this.rain) { this.fly = null; return; }
+    const W = this.canvasW;
+    if (!this.fly) {
+      this.fly = { x: rand(W * 0.2, W * 0.8), y: rand(1, 4), vx: rand(-6, 6), vy: rand(-2, 2) };
+    }
+    const f = this.fly;
+    // erratic buzz: the velocity itself keeps twitching
+    if (Math.random() < dt * 8) { f.vx = rand(-9, 9); f.vy = rand(-3, 3); }
+    f.x += f.vx * dt; f.y += f.vy * dt;
+    if (f.x < 3) { f.x = 3; f.vx = Math.abs(f.vx); }
+    if (f.x > W - 4) { f.x = W - 4; f.vx = -Math.abs(f.vx); }
+    if (f.y < 0) { f.y = 0; f.vy = Math.abs(f.vy); }
+    if (f.y > 6) { f.y = 6; f.vy = -Math.abs(f.vy); }
+  }
+
+  // The zoomies. Not tied to the weather — that is the difference with the fly,
+  // which only shows up during a shower and is therefore rare (one every 7 to
+  // 25 min). This fires on its own clock, and the target is a ghost: same four
+  // beats, nothing to see, and it teleports on every miss so the fit carries on
+  // somewhere else entirely.
+  maybeZoomies(minX, maxX) {
+    const t = this.t;
+    if (this.pet !== 'cat' || t < this.nextZoomAt) return;
+    if (this.joy || this.rain || this.feeding || this.beg || this.raid || this.tower) return;
+    if (POSE_FRAMES.has(this.frame)) return;
+    const w = Math.max(6, maxX - minX);
+    this.fly = { x: minX + Math.random() * w, y: rand(2, 5), vx: 0, vy: 0, ghost: true };
+    this.joy = {
+      lookUntil: t + rand(0.5, 1.1),            // barely a glance: it is already gone
+      endAt: t + rand(ZOOM_LEN[0], ZOOM_LEN[1]),
+      nextTurn: 0, wx: this.x, said: false,
+      beatUntil: 0, kind: null, flap: 0.22, speed: 0, zoom: true,
+    };
+    this.act = null;
+    this.groom = null;
+    this.nextZoomAt = t + rand(ZOOM_EVERY[0], ZOOM_EVERY[1]);
+  }
+
   // A burst of joy if it is raining, it is not busy, and the previous one is at
   // least JOY_GAP old.
   maybeJoy() {
@@ -709,14 +844,18 @@ class Duck {
   }
 
   // Joy in the rain: beak up, it looks left and right, then dabbles twice as
-  // fast as usual, splashing everywhere.
+  // fast as usual, splashing everywhere. Cat version: it spots the fly, then
+  // chases it — crouch, pounce, miss, again. It never catches it.
   runJoy(dt, minX, maxX) {
     const t = this.t, j = this.joy;
-    if (t > j.endAt || !this.rain) {
+    // a zoomies fit runs on its own clock, so it does not end with the shower
+    if (t > j.endAt || (!this.rain && !j.zoom)) {
       this.joy = null;
+      if (j.zoom) this.fly = null;             // the ghost goes back to nowhere
       this.nextJoyAt = t + rand(JOY_GAP[0], JOY_GAP[1]);
       return;
     }
+    if (this.pet === 'cat') return this.runCatChase(dt, minX, maxX, j);
     if (t < j.lookUntil) {
       this.frame = 'billUp';
       if (t > j.nextTurn) { this.dir = -this.dir; j.nextTurn = t + rand(0.6, 0.9); }
@@ -756,6 +895,65 @@ class Duck {
       x: this.x + rand(1, SPR_W - 1), y: SPR_H - rand(0, 2),
       vx: rand(-4, 4), vy: -rand(2, 6), ch: pick(['∘', '·', '°']), fg: WATER, life: rand(0.3, 0.8), rel: false,
     });
+  }
+
+  // The chase: eyes on the fly (head up), then crouch under it, wiggle, and
+  // pounce with the front paws out. The fly jinks away at the last moment,
+  // every time — that is the deal with flies.
+  runCatChase(dt, minX, maxX, j) {
+    const t = this.t;
+    const f = this.fly;
+    if (!f) { this.frame = 'billUp'; return; }
+    if (t < j.lookUntil) {
+      this.frame = 'billUp';
+      this.dir = f.x < this.x + SPR_W / 2 ? -1 : 1;
+      return;
+    }
+    if (!j.said) {
+      j.said = true;
+      if (Math.random() < 0.5) this.say('mrrrp !', 'calm', 1.4);
+    }
+    // Four beats, the way a cat actually hunts: it stalks belly-down towards
+    // the fly, wiggles its rear to load the spring, launches along an ARC, and
+    // lands. A straight horizontal dash was never going to read as a pounce.
+    if (j.kind == null) { j.kind = 'stalk'; j.beatUntil = t + rand(0.9, 1.6); }
+    if (t > j.beatUntil) {
+      if (j.kind === 'stalk') { j.kind = 'wiggle'; j.beatUntil = t + rand(0.5, 0.9); }
+      else if (j.kind === 'wiggle') {
+        j.kind = 'leap';
+        j.leapAt = t;
+        j.from = this.x;
+        j.to = Math.max(minX, Math.min(maxX, f.x - SPR_W / 2));
+        j.missed = false;
+        j.beatUntil = t + CAT_LEAP;
+      } else if (j.kind === 'leap') { j.kind = 'land'; j.beatUntil = t + rand(0.25, 0.4); }
+      else { j.kind = 'stalk'; j.beatUntil = t + rand(0.9, 1.6); }
+    }
+    this.dir = f.x < this.x + SPR_W / 2 ? -1 : 1;
+    if (j.kind === 'stalk') {
+      // creeps in, low and slow, stopping just short of the fly
+      const aim = f.x - SPR_W / 2 + (this.dir < 0 ? 4 : -4);
+      this.moveToward(aim, 4, dt, minX, maxX);
+      this.frame = Math.floor(t / 0.4) % 2 === 0 ? 'stalkA' : 'stalkB';
+    } else if (j.kind === 'wiggle') {
+      this.frame = Math.floor(t / 0.11) % 2 === 0 ? 'wiggleA' : 'wiggleB';   // rear lashing
+    } else if (j.kind === 'leap') {
+      // the arc: horizontal travel is linear, height is a half sine — and the
+      // hop decay applied later in update() is compensated here
+      const k = Math.min(1, (t - j.leapAt) / CAT_LEAP);
+      this.x = Math.max(minX, Math.min(maxX, j.from + (j.to - j.from) * k));
+      this.hop = 4.5 * Math.sin(Math.PI * k) + dt * 6;
+      this.frame = 'leap';
+      // the miss, at the top of the arc: the fly jinks away every single time
+      if (k > 0.45 && !j.missed) {
+        j.missed = true;
+        f.x = Math.max(3, Math.min(this.canvasW - 4, f.x + rand(9, 15) * (Math.random() < 0.5 ? -1 : 1)));
+        f.vx = -f.vx;
+        f.vy = -Math.abs(f.vy) - 1;
+      }
+    } else {
+      this.frame = 'land';
+    }
   }
 
   // Fires a begging round if the belly is empty and it is not already busy with
@@ -909,7 +1107,10 @@ class Duck {
     }
     // as soon as it leaves the water it flaps at full speed — three positions
     // cycled every 70 ms, which gives the panicked flutter of a chick
-    this.frame = reach > 0.12 ? RAID_FLAP[Math.floor(t / 0.07) % RAID_FLAP.length] : 'raidLow';
+    // the cat's three flap drawings are the same image, so cycling them shows
+    // nothing: it alternates paws-down and paws-up instead, which do differ
+    const flap = this.pet === 'cat' ? CAT_RAID_FLAP : RAID_FLAP;
+    this.frame = reach > 0.12 ? flap[Math.floor(t / 0.07) % flap.length] : 'raidLow';
     this.peck = { m: r.m, x: Math.round(beakX()), reach };
   }
 
@@ -989,8 +1190,10 @@ class Duck {
       if (ctx.mode === 'panic' && t >= this.sedatedUntil) this.say('QUACK !!', 'panic', 2);
     }
 
+    const xBefore = this.x;
     this.updateSeeds(dt);
     this.updateWeather();   // before the sedative: it rains on a sleeping duck too
+    this.updateFly(dt);
 
     // Sedated: a peaceful nap, deaf to the gauges and to the seeds alike.
     if (t < this.sedatedUntil) {
@@ -1016,6 +1219,7 @@ class Duck {
     this.maybePoop();
     this.maybeBeg();
     this.maybeJoy();
+    this.maybeZoomies(minX, maxX);
     this.maybeRaid(ctx.bars);
 
     const busy = ctx.mode === 'alert' || ctx.mode === 'panic';
@@ -1083,6 +1287,22 @@ class Duck {
 
     if (this.poopPose) this.runPoopPose();
 
+    // walk frames: only meaningful when it actually moved this tick
+    this.moving = Math.abs(this.x - xBefore) > 0.02;
+
+    // The cat comes down from its tower the moment anything other than the nap
+    // needs it (meal, begging, raid, alert…): a quick jump, then business.
+    if (this.tower && this.tower.phase !== 'down') {
+      const napping = this.act && this.act.name === 'sleep' && !this.feeding && !this.beg && !this.raid && !this.joy && !busy;
+      if (!napping) this.tower = { phase: 'down', t0: t };
+    }
+    if (this.tower && this.tower.phase === 'down' && t - this.tower.t0 > 0.3) this.tower = null;
+
+    // the grooming routine only exists for as long as the activity that owns it:
+    // anything that interrupts (a meal, a raid, an alert) drops it on the spot
+    if (this.groom && (t > this.groom.until || this.feeding
+      || !this.act || (this.act.name !== 'dabble' && this.act.name !== 'preen'))) this.groom = null;
+
     this.hop = Math.max(0, this.hop - dt * 6);
     if (this.bubble && t > this.bubble.until) this.bubble = null;
 
@@ -1095,22 +1315,53 @@ class Duck {
   }
 
   renderInfo() {
-    const rows = SPR[this.frame] || SPR.stand;
+    const cat = this.pet === 'cat';
+    let name = this.frame;
+    // Several cat poses are cycles, not single frames: the engine names a pose,
+    // the drawing decides how it moves. Walking, washing, licking and the alert
+    // meow all say nothing as a still image.
+    if (cat) {
+      if (name === 'stand' && this.moving) name = cycleFrame('walk', this.t);
+      // the engine says 'dabble' both for foraging and for eating: a cat washes
+      // itself in the first case and puts its head to the floor in the second
+      else if (this.groom && !this.feeding && (name === 'dabble' || name === 'preen')) {
+        name = groomFrame(this.groom, this.t);
+      } else if (name === 'dabble') name = cycleFrame(this.feeding ? 'eat' : 'wash', this.t);
+      else if (name === 'preen') name = cycleFrame('lick', this.t);
+      else if (name === 'lookA' || name === 'lookB') name = cycleFrame('meow', this.t);
+      // the artwork's 'quack' cell is a curled-up cat: using it would roll the
+      // cat into a ball mid-stroll every time it vocalises. It sits up instead.
+      else if (name === 'quack') name = cycleFrame('meow', this.t);
+    }
+    const table = cat ? SPR_CAT : SPR;
+    const rows = table[name] || table.stand;
     const mirror = this.dir > 0;
     // the duck floats: the bobbing pushes it into the water (downwards only),
-    // only the hops lift it up
+    // only the hops lift it up. The cat does not bob: it is on dry land.
     let yOff;
     if (this.mode === 'panic' && (!this.phase || this.phase.name === 'point') && !this.feeding) {
-      yOff = Math.round(((Math.sin(this.t * 10) + 1) / 2) * 2);
+      yOff = cat ? 0 : Math.round(((Math.sin(this.t * 10) + 1) / 2) * 2);
     } else if (this.frame === 'sleep') {
-      yOff = Math.round(((Math.sin(this.t * 1.1) + 1) / 2) * 1.2);
+      yOff = cat ? 0 : Math.round(((Math.sin(this.t * 1.1) + 1) / 2) * 1.2);
     } else {
-      yOff = Math.round(((Math.sin(this.t * 2.1) + 1) / 2) * 1.4);
+      yOff = cat ? 0 : Math.round(((Math.sin(this.t * 2.1) + 1) / 2) * 1.4);
     }
     yOff -= Math.round(this.hop);
+    // tower lift, 0 → 1: the ui converts it to pixels (it knows the tower height)
+    let towerLift = 0;
+    if (this.tower) {
+      const e = this.t - this.tower.t0;
+      if (this.tower.phase === 'up') towerLift = Math.min(1, e / 0.28);
+      else if (this.tower.phase === 'on') towerLift = 1;
+      else towerLift = Math.max(0, 1 - e / 0.3);
+    }
     return { rows, mirror, x: Math.round(this.x), yOff, particles: this.particles, seeds: this.seeds,
-      pills: this.pills, poops: this.poops, t: this.t, rain: this.rainStrength(),
-      bites: this.bites, peck: this.raid ? this.peck : null };
+      pills: this.pills, poops: this.poops, t: this.t, rain: cat ? 0 : this.rainStrength(),
+      bites: this.bites, peck: this.raid ? this.peck : null,
+      // a ghost target is deliberately not drawn: the whole point of the zoomies
+      // is that the cat is hunting something only it can see
+      pet: this.pet, towerLift,
+      fly: this.fly && !this.fly.ghost ? { x: this.fly.x, y: this.fly.y } : null };
   }
 }
 

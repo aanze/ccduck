@@ -1,7 +1,7 @@
 {
   "name": "ccduck",
-  "version": "1.15.2",
-  "description": "Claude Code token monitor for the terminal, with a pixel-art debug duck",
+  "version": "2.0.0",
+  "description": "Claude Code token monitor for the terminal, with a pixel-art debug duck — or cat",
   "repository": {
     "type": "git",
     "url": "https://github.com/aanze/ccduck.git"
@@ -9,7 +9,8 @@
   "homepage": "https://github.com/aanze/ccduck#readme",
   "bin": {
     "ccduck": "bin/ccduck.js",
-    "claude-duck": "bin/ccduck.js"
+    "claude-duck": "bin/ccduck.js",
+    "cccat": "bin/cccat.js"
   },
   "files": [
     "bin/",
@@ -19,5 +20,8 @@
     "node": ">=18"
   },
   "private": true,
-  "license": "MIT"
+  "license": "MIT",
+  "scripts": {
+    "atlas": "node tools/cat-atlas.js"
+  }
 }

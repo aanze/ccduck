@@ -22,9 +22,11 @@ Usage: ccduck [options]
   --config PATH    config file (default: ~/.ccduck.json)
   --update         update ccduck now (git pull, or reinstall from the repo)
   --auto-reauth    renew the expired OAuth token instead of waiting for Claude Code
+  --cat, --duck    which animal, for this run only (cccat = ccduck --cat)
   --help, --version
 
-Keys  : [q] quit  [f] feed the duck  [s] sleeping pill (5 min)  [r] refresh  [m] metric  [c] table  [d] demo  [p] pause
+Keys  : [q] quit  [f] feed  [s] sleeping pill (5 min)  [r] refresh  [m] metric  [c] table  [d] demo  [p] pause
+        [x] swap duck and cat for this session
         [u] install the update when one is offered in the header
         [a] toggle auto-reauth (off by default: ccduck only reads the token file)
 Config: ~/.ccduck.json (limits, thresholds, weekly reset… see README)`;
@@ -46,6 +48,9 @@ function parseArgs(argv) {
     else if (a === '--debug-usage') o.debugUsage = true;
     else if (a === '--update') o.update = true;
     else if (a === '--auto-reauth') o.autoReauth = true;
+    // which animal, for this run only: what the `cccat` launcher passes
+    else if (a === '--cat') o.pet = 'cat';
+    else if (a === '--duck') o.pet = 'duck';
     else if (a === '--mirror') o.mirror = true;
     else if (a === '--mirror-watch') { o.mirror = true; o.mirrorWatch = true; }
     else o._.push(a);
@@ -77,6 +82,7 @@ async function run(argv) {
 
   const cfg = load(opts.config);
   if (opts.autoReauth) cfg.autoReauth = true;
+  if (opts.pet) cfg.pet = opts.pet;        // --cat / --duck win over the config file
   let metric = METRICS.includes(opts.metric) ? opts.metric : (METRICS.includes(cfg.metric) ? cfg.metric : 'cost');
   const mode = colorMode(process.env, opts.noColor ? '256' : null);
   const isTTY = !!process.stdout.isTTY;
@@ -163,6 +169,7 @@ async function run(argv) {
     const screen = new Screen(cols, Math.min(rows, 30), mode);
     const snap = applyDemo(store.snapshot(Date.now(), metric), opts.demo ?? null, 0);
     const duck = new Duck(cols);
+    duck.pet = cfg.pet === 'cat' ? 'cat' : 'duck';
     duck.x = Math.round(cols / 2 - 8);
     const geo = ui.metersGeometry(snap, cols, cfg);
     duck.update(0.01, { mode: geo.level, targetX: geo.worst ? geo.worst.tip : cols / 2, worstLabel: geo.worst ? geo.worst.label : '', worstPct: geo.worst ? geo.worst.pct : 0, soft: geo.soft, canvasW: cols });
@@ -184,6 +191,7 @@ async function run(argv) {
     store.scanSync();
     const screen = new Screen(cols, rows, mode);
     const duck = new Duck(cols);
+    duck.pet = cfg.pet === 'cat' ? 'cat' : 'duck';
     let t = 0;
     for (let f = 0; f < opts.frames; f++) {
       t += 0.1;
@@ -203,6 +211,7 @@ async function run(argv) {
   // ---- mode interactif ----
   let screen = new Screen(cols, rows, mode);
   const duck = new Duck(cols);
+    duck.pet = cfg.pet === 'cat' ? 'cat' : 'duck';
   let demo = opts.demo ?? null;
   let showTable = cfg.showTable !== false;
   let paused = false;
@@ -267,6 +276,12 @@ async function run(argv) {
       else if (k === 'f' || k === 'F') { duck.feed(); }
       else if (k === 's' || k === 'S') { duck.dropPill(); }
       else if (k === 'c' || k === 'C') { showTable = !showTable; }
+      else if (k === 'x' || k === 'X') {
+        // swap the animal: same behaviours, different drawings. Session only —
+        // set "pet": "cat" in ~/.ccduck.json to make it permanent.
+        duck.pet = duck.pet === 'cat' ? 'duck' : 'cat';
+        duck.tower = null;
+      }
       else if (k === 'a' || k === 'A') {
         // toggles between "wait for Claude Code to renew" (default) and
         // "ccduck renews the expired token itself". Session only: to make it

@@ -30,6 +30,7 @@ const DEFAULTS = {
   showTable: true,
   checkUpdates: true,        // checks twice a day whether a newer version exists
   autoReauth: false,         // renew the expired OAuth token ourselves (the `a` key) — see src/auth.js
+  pet: 'duck',               // 'duck' | 'cat' — which animal lives in the panel (the `x` key)
 };
 
 function configPath() {

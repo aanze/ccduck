@@ -8,3 +8,6 @@ bin/ccduck.js text eol=lf
 
 # Packaged releases are binary, never touch them.
 *.tgz binary
+
+# The cat launcher, same reason as ccduck.js.
+bin/cccat.js text eol=lf
