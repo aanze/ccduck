@@ -78,7 +78,7 @@ A ready-to-use npm package sits in [`dist/`](dist/) (and is attached to GitHub R
 Download the `.tgz`, then:
 
 ```bash
-npm install -g ./ccduck-2.0.1.tgz
+npm install -g ./ccduck-2.0.2.tgz
 ```
 
 (Frozen copy: to update, reinstall the next version's `.tgz`.)
@@ -113,6 +113,31 @@ ccduck --once
 
 If the command isn't found: make sure npm's global folder (`npm prefix -g`, typically
 `%APPDATA%\npm` on Windows) is on your `PATH`, then reopen the terminal.
+
+### Watching the rare behaviours
+
+Hunger, rain, the fly and the cat's zoomies run on timers of several minutes, so they are
+easy to never see. Three environment variables shorten those timers — they change nothing
+else, and only for that run:
+
+```bash
+CCDUCK_HUNGRY_SEC=20 cccat
+```
+
+```bash
+CCDUCK_RAIN_EVERY=15 cccat
+```
+
+```bash
+CCDUCK_ZOOM_EVERY=15 cccat
+```
+
+`CCDUCK_HUNGRY_SEC` is the delay before it starts begging (it then escalates and, once
+starving, raids the gauges). `CCDUCK_RAIN_EVERY` is the wait between showers for the duck,
+and between flies for the cat — same timer. `CCDUCK_ZOOM_EVERY` is the wait between the
+cat's zoomies. Each accepts seconds, and the real wait lands between the value and twice
+it. They combine, and `ccduck` takes them just the same. On Windows PowerShell, set them
+first: `$env:CCDUCK_ZOOM_EVERY=15; cccat`.
 
 ## Where the numbers come from
 

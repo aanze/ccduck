@@ -421,7 +421,9 @@ const CAT_RAID_FLAP = ['raidFlapUp', 'raidLow'];
 // it. Nothing is there. It reuses the whole fly-chase machinery, aimed at a
 // target the renderer is told not to draw — which is exactly what the thing
 // looks like from the outside.
-const ZOOM_EVERY = [150, 300];   // one fit every 2.5 to 5 min
+// CCDUCK_ZOOM_EVERY shortens the wait between fits (for tuning).
+const ZOOM_TEST = Number(process.env.CCDUCK_ZOOM_EVERY) || 0;
+const ZOOM_EVERY = ZOOM_TEST ? [ZOOM_TEST, ZOOM_TEST * 2] : [150, 300];  // 2.5 to 5 min
 const ZOOM_LEN = [7, 13];        // long enough for two or three pounces
 const BITE_REGEN = 240;        // a nibbled bar takes 4 min to close up
 // Picture bubble: seeds and a question mark, not a sentence — words stay

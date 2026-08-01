@@ -29,7 +29,12 @@ Keys  : [q] quit  [f] feed  [s] sleeping pill (5 min)  [r] refresh  [m] metric  
         [x] swap duck and cat for this session
         [u] install the update when one is offered in the header
         [a] toggle auto-reauth (off by default: ccduck only reads the token file)
-Config: ~/.ccduck.json (limits, thresholds, weekly reset… see README)`;
+Config: ~/.ccduck.json (limits, thresholds, weekly reset… see README)
+
+Tuning  the rare behaviours are on long timers; these shorten them, in seconds:
+        CCDUCK_HUNGRY_SEC=20    begging, then bar raiding once starving
+        CCDUCK_RAIN_EVERY=15    rain (duck) / the fly it chases (cat)
+        CCDUCK_ZOOM_EVERY=15    the cat's zoomies`;
 
 function parseArgs(argv) {
   const o = { _: [] };
