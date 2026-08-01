@@ -78,7 +78,7 @@ A ready-to-use npm package sits in [`dist/`](dist/) (and is attached to GitHub R
 Download the `.tgz`, then:
 
 ```bash
-npm install -g ./ccduck-2.0.2.tgz
+npm install -g ./ccduck-2.0.3.tgz
 ```
 
 (Frozen copy: to update, reinstall the next version's `.tgz`.)
@@ -136,8 +136,16 @@ CCDUCK_ZOOM_EVERY=15 cccat
 starving, raids the gauges). `CCDUCK_RAIN_EVERY` is the wait between showers for the duck,
 and between flies for the cat — same timer. `CCDUCK_ZOOM_EVERY` is the wait between the
 cat's zoomies. Each accepts seconds, and the real wait lands between the value and twice
-it. They combine, and `ccduck` takes them just the same. On Windows PowerShell, set them
-first: `$env:CCDUCK_ZOOM_EVERY=15; cccat`.
+it. They combine, and `ccduck` takes them just the same. On Windows PowerShell the `VAR=x cmd` prefix does not
+exist — set the variable first, and clear it afterwards:
+
+```bash
+$env:CCDUCK_HUNGRY_SEC=20; cccat
+```
+
+```bash
+Remove-Item Env:CCDUCK_HUNGRY_SEC
+```
 
 ## Where the numbers come from
 

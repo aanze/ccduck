@@ -1050,6 +1050,7 @@ class Duck {
   // pecked.
   runRaid(dt, minX, maxX) {
     const t = this.t, r = this.raid;
+    this.raidTick = t;                 // see the guard at the end of update()
     if (t > r.until) { this.raid = null; this.peck = null; return; }
     if (r.aim == null) r.aim = r.x0 + Math.floor(rand(0, Math.max(1, r.tip - r.x0)));
     // From behind: the beak is in the middle of the sprite (column 7), and that
@@ -1301,6 +1302,15 @@ class Duck {
       if (!napping) this.tower = { phase: 'down', t0: t };
     }
     if (this.tower && this.tower.phase === 'down' && t - this.tower.t0 > 0.3) this.tower = null;
+
+    // A raid pre-empted mid-jump ends there and then. Feeding, begging and joy
+    // all sit above it in the chain above, so runRaid simply stops being called
+    // — and `peck`, which is what lifts the animal out of the water and up to
+    // the gauge, would keep its last value for as long as `raid` stayed set.
+    // The animal then hung frozen on the bar, in whatever pose the behaviour
+    // that pre-empted it was drawing. Anything that stops driving the raid ends
+    // it, without that branch having to remember to.
+    if (this.raid && this.raidTick !== t) { this.raid = null; this.peck = null; }
 
     // the grooming routine only exists for as long as the activity that owns it:
     // anything that interrupts (a meal, a raid, an alert) drops it on the spot
