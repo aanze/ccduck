@@ -811,8 +811,10 @@ class Duck {
     if (this.raid || this.beg || this.feeding || this.hungerLevel() < STARVING) return;
     if (t < this.nextRaidAt || POSE_FRAMES.has(this.frame)) return;
     if (!bars || !Array.isArray(bars.tips)) return;
-    // il ne vise que les barres qui ont de quoi être grignotées
-    const cand = bars.tips.map((tip, m) => ({ m, tip })).filter((c) => c.tip > bars.x0 + 2);
+    // il ne vise que les barres qui ont de quoi être grignotées — une cellule
+    // remplie suffit, sinon une jauge basse (session en début de bloc) serait
+    // exclue en permanence et il ne s'en prendrait qu'aux deux autres
+    const cand = bars.tips.map((tip, m) => ({ m, tip })).filter((c) => c.tip > bars.x0);
     if (!cand.length) return;
     const c = pick(cand);
     this.nextRaidAt = t + rand(RAID_EVERY[0], RAID_EVERY[1]);
