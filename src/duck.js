@@ -837,13 +837,24 @@ class Duck {
     // sous la colonne visée. `reach` (0 → 1) dit à l'interface de combien le
     // sortir de l'eau : à 1 le bec touche la barre.
     const beakX = () => this.x + 7;
-    this.dir = -1;                                  // sprite symétrique, pas de miroir
-    if (r.jumpAt == null) {
-      // au repos : il se replace sous sa cible, puis se ramasse et détend
-      this.moveToward(r.aim - 7, 22, dt, minX, maxX);
-      if (Math.abs(beakX() - r.aim) < 1.2 && t > r.nextBite) r.jumpAt = t;
-    }
     let reach = 0;
+    if (r.jumpAt == null) {
+      // Tant qu'il n'est pas à l'aplomb de sa cible, il y nage normalement, de
+      // profil : un canard qui se déplace de dos, ça ne ressemble à rien. Il ne
+      // se retourne qu'une fois en place, juste avant de décoller.
+      this.moveToward(r.aim - 7, 22, dt, minX, maxX);
+      if (Math.abs(beakX() - r.aim) >= 1.2) {
+        this.frame = 'stand';
+        if (Math.random() < dt * 5) this.spawn({
+          x: this.dir < 0 ? this.x + SPR_W - 2 : this.x + 1, y: SPR_H - 1,
+          vx: -this.dir * rand(1, 3), vy: -rand(0.5, 2), ch: '·', fg: WATER, life: rand(0.3, 0.7),
+        });
+        this.peck = { m: r.m, x: Math.round(beakX()), reach: 0 };
+        return;
+      }
+      this.dir = -1;                 // en place : il se retourne, dos à nous, face à la jauge
+      if (t > r.nextBite) r.jumpAt = t;
+    }
     if (r.jumpAt != null) {
       const e = t - r.jumpAt;
       if (e < RAID_UP) reach = e / RAID_UP;                       // la détente
@@ -873,6 +884,10 @@ class Duck {
         r.jumpAt = null; r.bitten = false;
         r.nextBite = t + rand(0.25, 0.6);
         r.aim = r.x0 + Math.floor(rand(0, Math.max(1, r.tip - r.x0)));
+        // il repart de profil vers la colonne suivante dès cette image
+        this.frame = 'stand';
+        this.peck = { m: r.m, x: Math.round(beakX()), reach: 0 };
+        return;
       }
     }
     // dès qu'il quitte l'eau, il bat des ailes à toute vitesse — trois positions
