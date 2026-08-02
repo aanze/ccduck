@@ -418,6 +418,7 @@ const CAT_LEAP = 0.42;   // how long the cat spends in the air on a pounce
 // The hop onto the tower. 0.28 s is three frames at ten a second — the leap
 // drawing barely registered before the cat was already curled up on top.
 const TOWER_LEAP = 0.45;
+const TOWER_STANDOFF = [13, 20];  // how far to the side it launches from
 const WALK_PX = 5.5;             // ground covered by one full four-beat cycle
 const WALK_CYCLE = 0.90;         // ...which is how long that cycle lasts
 const CAT_GROOM_GAP = [30, 70];   // breathing space after a full session...
@@ -707,23 +708,33 @@ class Duck {
         // this.tower). But one nap in three it cannot be bothered with the climb
         // and curls up right where it is standing, which is also what a cat does.
         const twx = towerCatX(this.canvasW);
+        // It does not park itself underneath and go straight up like a lift: it
+        // stops a stride and a half to the side, gathers itself, and jumps
+        // ACROSS. That is what the stretched leap drawing is for, and it had
+        // nothing to cross.
+        if (a.launchX == null) a.launchX = twx + rand(TOWER_STANDOFF[0], TOWER_STANDOFF[1]);
+        const lo = Math.min(minX, twx), hi = Math.max(maxX, a.launchX);
         if (!a.at) {
           this.frame = 'stand';
           // the platform overhangs the usual bounds: widen them for this trip
-          if (!this.moveToward(twx, 9, dt, Math.min(minX, twx), Math.max(maxX, twx))) a.at = t;
+          if (!this.moveToward(a.launchX, 9, dt, lo, hi)) a.at = t;
           return;
         }
-        this.x = twx;                 // no drifting while up there
-        this.dir = -1;
+        this.dir = -1;                // facing the tower, which is to its left
         const e = t - a.at;
-        // it gathers itself under the tower — rear wiggling — then leaps
-        if (e < 0.45) { this.frame = Math.floor(t / 0.12) % 2 === 0 ? 'wiggleA' : 'wiggleB'; return; }
+        // it gathers itself where it stands — rear wiggling — then leaps
+        if (e < 0.45) { this.x = a.launchX; this.frame = Math.floor(t / 0.12) % 2 === 0 ? 'wiggleA' : 'wiggleB'; return; }
         if (!this.tower) this.tower = { phase: 'up', t0: t };          // leap!
         if (this.tower.phase === 'up') {
+          // horizontal travel is linear across the whole hop; the height is
+          // eased in renderInfo, so it gets up fast and arrives softly
+          const k = Math.min(1, (t - this.tower.t0) / TOWER_LEAP);
+          this.x = a.launchX + (twx - a.launchX) * k;
           this.frame = 'leap';
-          if (t - this.tower.t0 >= TOWER_LEAP) this.tower = { phase: 'on', t0: t };
+          if (k >= 1) this.tower = { phase: 'on', t0: t };
           else return;
         }
+        this.x = twx;                 // no drifting while up there
       }
       this.frame = 'sleep';
       if (Math.random() < dt * 0.9) this.spawn({
@@ -1492,7 +1503,9 @@ class Duck {
     let towerLift = 0;
     if (this.tower) {
       const e = this.t - this.tower.t0;
-      if (this.tower.phase === 'up') towerLift = Math.min(1, e / TOWER_LEAP);
+      // eased, not linear: it clears the platform early in the hop and settles
+      // onto it, rather than rising at a constant rate like a lift
+      if (this.tower.phase === 'up') towerLift = Math.sin(Math.min(1, e / TOWER_LEAP) * Math.PI / 2);
       else if (this.tower.phase === 'on') towerLift = 1;
       else towerLift = Math.max(0, 1 - e / 0.3);
     }
