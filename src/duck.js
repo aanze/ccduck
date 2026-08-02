@@ -863,16 +863,25 @@ class Duck {
       this.fly = { x: rand(W * 0.2, W * 0.8), y: rand(1, 4), vx: rand(-6, 6), vy: rand(-2, 2) };
     }
     const f = this.fly;
-    // erratic buzz: the velocity itself keeps twitching
-    if (Math.random() < dt * 8) { f.vx = rand(-9, 9); f.vy = rand(-3, 3); }
-    // Being chased, it bolts: short bursts several times faster than its idle
-    // drift, which is what makes it impossible to catch and worth watching. It
-    // only does this when something is actually after it.
+    // Being chased, it BOLTS, and it bolts away from the thing chasing it. The
+    // direction used to be a coin toss, so half its escapes were straight back
+    // at the cat and it never really left. Now it reads where the cat is: away
+    // most of the time, doubling back one time in eight because a fly that flees
+    // in a straight line is not a fly. It also bolts more often, and idles
+    // faster, once the cat is close enough to matter.
     const chased = !!(this.joy && !this.joy.zoom);
+    const catCx = this.x + SPR_W / 2;
+    const away = f.x >= catCx ? 1 : -1;
+    const near = Math.abs(f.x - catCx) < 14;
     if (f.dashUntil == null) f.dashUntil = 0;
-    if (chased && this.t > f.dashUntil && Math.random() < dt * 1.1) {
+    // erratic buzz: the velocity itself keeps twitching
+    if (Math.random() < dt * 8) {
+      f.vx = chased ? away * rand(2, 11) * (Math.random() < 0.18 ? -1 : 1) : rand(-9, 9);
+      f.vy = rand(-3, 3);
+    }
+    if (chased && this.t > f.dashUntil && Math.random() < dt * (near ? 2.8 : 1.0)) {
       f.dashUntil = this.t + rand(0.25, 0.55);
-      f.vx = (Math.random() < 0.5 ? -1 : 1) * rand(FLY_DASH[0], FLY_DASH[1]);
+      f.vx = away * rand(FLY_DASH[0], FLY_DASH[1]) * (Math.random() < 0.12 ? -1 : 1);
       f.vy = rand(-4, 4);
     }
     f.x += f.vx * dt; f.y += f.vy * dt;
@@ -948,6 +957,16 @@ class Duck {
       this.joy = null;
       if (j.zoom) this.fly = null;             // the ghost goes back to nowhere
       this.nextJoyAt = t + rand(JOY_GAP[0], JOY_GAP[1]);
+      // A few seconds of nothing before normal life resumes. Without it the very
+      // frame after a landing could be the first of a wash, and an animal that
+      // touches down and starts grooming in the same tenth of a second reads as
+      // a glitch, not as a cat. For the cat this activity is a full stop, so it
+      // stands, settles and blinks — which is exactly what catching your breath
+      // looks like.
+      if (this.pet === 'cat') {
+        this.act = { name: 'drift', x: this.x, speed: 0, start: t, until: t + rand(2.5, 5) };
+        this.postponeUrges();
+      }
       return;
     }
     if (this.pet === 'cat') return this.runCatChase(dt, minX, maxX, j);
