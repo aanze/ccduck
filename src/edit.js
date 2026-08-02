@@ -58,15 +58,24 @@ function run(opts) {
 
   const cur = () => tables[pet][names[idx]];
   const def = () => DEFAULTS[pet][names[idx]];
-  const dirty = () => cur().join('|') !== def().join('|');
+  // What is on disk for this pose: the stored override, or the built-in drawing
+  // when there is none. "Unsaved" means differing from THAT — comparing against
+  // the default instead said "changed, unsaved" about a pose that had just been
+  // saved, and went on saying it after a restart, since the override is applied
+  // over the table at startup and so always differs from the default.
+  const saved = () => { const all = sprites.load(); return (all[pet] && all[pet][name()]) || null; };
+  const name = () => names[idx];
+  const onDisk = () => saved() || def();
+  const dirty = () => cur().join('|') !== onDisk().join('|');
 
   function draw() {
     scr.clear();
-    const name = names[idx];
+    const nm = name();
+    const stored = saved();
     scr.text(1, 0, 'ccduck sprite editor', C.title, null, A_BOLD);
-    scr.text(23, 0, '· ' + pet + ' · ' + name + '  (' + (idx + 1) + '/' + names.length + ')', C.title);
+    scr.text(23, 0, '· ' + pet + ' · ' + nm + '  (' + (idx + 1) + '/' + names.length + ')', C.title);
     if (dirty()) scr.text(cols - 22, 0, '● changed, unsaved', C.warn);
-    else if (sprites.load()[pet] && sprites.load()[pet][name]) scr.text(cols - 22, 0, '● saved override', C.ok);
+    else if (stored) scr.text(cols - 22, 0, '● saved', C.ok);
     else scr.text(cols - 22, 0, '○ default', C.dim);
 
     // ---- left: the drawing, at the exact proportion the app renders it ----
@@ -89,6 +98,7 @@ function run(opts) {
     }
 
     // ---- right: the grid of letters, with the cursor ----
+    const disk = onDisk();
     const gx = pw + 3;
     panel(scr, gx, 2, W + 8, H + 2, 'pixels');
     for (let r = 0; r < H; r++) {
@@ -99,7 +109,8 @@ function run(opts) {
         scr.set(gx + 4 + c, 3 + r, ch, here ? 0x111111 : (ch === '.' ? C.frame : PAL[ch]),
           here ? C.cursor : null, here ? A_BOLD : 0);
       }
-      if (cur()[r] !== def()[r]) scr.set(gx + 4 + W + 1, 3 + r, '·', C.warn);
+      // a mark beside every row not yet written to disk
+      if (cur()[r] !== disk[r]) scr.set(gx + 4 + W + 1, 3 + r, '·', C.warn);
     }
 
     // ---- palette ----
@@ -169,8 +180,16 @@ function run(opts) {
     }
     else if (k === '.' || k === ' ') setPixel('.');
     else if (k === 's') {
-      if (dirty()) { sprites.setOverride(pet, names[idx], cur()); msg = { text: 'saved — ' + pet + '.' + names[idx] + ' will be used from the next launch', col: C.ok }; }
-      else { sprites.clearOverride(pet, names[idx]); msg = { text: 'identical to the default: the override was removed', col: C.dim }; }
+      // Storing is decided against the DEFAULT, not against what is on disk: a
+      // pose that matches the built-in drawing needs no override at all, and one
+      // that does not gets written whether or not it already had one.
+      if (cur().join('|') === def().join('|')) {
+        sprites.clearOverride(pet, name());
+        msg = { text: 'identical to the built-in drawing: no override needed', col: C.dim };
+      } else {
+        sprites.setOverride(pet, name(), cur());
+        msg = { text: 'saved — ' + pet + '.' + name() + ' is used from the next launch', col: C.ok };
+      }
     }
     else if (k === 'd') {
       cur().splice(0, H, ...def());
