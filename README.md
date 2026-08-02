@@ -86,7 +86,7 @@ A ready-to-use npm package sits in [`dist/`](dist/) (and is attached to GitHub R
 Download the `.tgz`, then:
 
 ```bash
-npm install -g ./ccduck-2.6.7.tgz
+npm install -g ./ccduck-2.6.8.tgz
 ```
 
 (Frozen copy: to update, reinstall the next version's `.tgz`.)
