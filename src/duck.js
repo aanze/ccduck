@@ -400,6 +400,16 @@ const RAIN_LEN = [30, 300];    // a shower lasts 30 s to 5 min
 const JOY_AFTER = [3, 6];      // the time it takes to notice
 const JOY_LEN = [6.5, 10];     // one burst of joy, 10 s at most
 const JOY_GAP = [30, 50];      // and never two bursts less than 30 s apart
+// A cat chases the real fly for as long as it is worth chasing. FLY_FAR is how
+// far it can get before the cat starts losing the thread; the two rates are
+// chances per second of giving up, near and far. Near, that is one chance in
+// twenty-five each second, so a fly that stays around keeps it busy for the best
+// part of half a minute and often much longer.
+const FLY_FAR = 30;
+const FLY_GIVEUP = 0.02;
+const FLY_GIVEUP_FAR = 0.15;
+// and it does not fly evenly: chased, it puts on bursts of speed
+const FLY_DASH = [16, 26];
 const JOYS = ['♥', 'quack quack !', '♥ ♥'];
 
 // Hunger: with no meal for HUNGRY_AFTER it comes begging, filling the frame, and
@@ -855,6 +865,16 @@ class Duck {
     const f = this.fly;
     // erratic buzz: the velocity itself keeps twitching
     if (Math.random() < dt * 8) { f.vx = rand(-9, 9); f.vy = rand(-3, 3); }
+    // Being chased, it bolts: short bursts several times faster than its idle
+    // drift, which is what makes it impossible to catch and worth watching. It
+    // only does this when something is actually after it.
+    const chased = !!(this.joy && !this.joy.zoom);
+    if (f.dashUntil == null) f.dashUntil = 0;
+    if (chased && this.t > f.dashUntil && Math.random() < dt * 1.1) {
+      f.dashUntil = this.t + rand(0.25, 0.55);
+      f.vx = (Math.random() < 0.5 ? -1 : 1) * rand(FLY_DASH[0], FLY_DASH[1]);
+      f.vy = rand(-4, 4);
+    }
     f.x += f.vx * dt; f.y += f.vy * dt;
     if (f.x < 3) { f.x = 3; f.vx = Math.abs(f.vx); }
     if (f.x > W - 4) { f.x = W - 4; f.vx = -Math.abs(f.vx); }
@@ -906,8 +926,25 @@ class Duck {
   // chases it — crouch, pounce, miss, again. It never catches it.
   runJoy(dt, minX, maxX) {
     const t = this.t, j = this.joy;
-    // a zoomies fit runs on its own clock, so it does not end with the shower
-    if (t > j.endAt || (!this.rain && !j.zoom)) {
+    // A zoomies fit runs on its own clock — there is nothing really there, so
+    // only the clock can end it. A chase after the actual fly does not: as long
+    // as the thing is buzzing around its head the cat keeps at it, and what ends
+    // it is the fly leaving, going far enough that the cat loses the thread (and
+    // even then it sometimes carries on), or the plain occasional loss of
+    // interest. A fixed six-to-ten-second burst had it ignoring a fly circling
+    // its ears for the next forty seconds.
+    const chasing = this.pet === 'cat' && !j.zoom;
+    // the fixed burst length still governs the duck's joy in the rain and the
+    // cat's zoomies; the chase after a real fly answers to the fly instead
+    let over = (!this.rain && !j.zoom) || (!chasing && t > j.endAt);
+    if (!over && chasing) {
+      if (!this.fly) over = true;
+      else {
+        const far = Math.abs(this.fly.x - (this.x + SPR_W / 2)) > FLY_FAR;
+        over = Math.random() < dt * (far ? FLY_GIVEUP_FAR : FLY_GIVEUP);
+      }
+    }
+    if (over) {
       this.joy = null;
       if (j.zoom) this.fly = null;             // the ghost goes back to nowhere
       this.nextJoyAt = t + rand(JOY_GAP[0], JOY_GAP[1]);
@@ -1002,7 +1039,10 @@ class Duck {
       // a real fly does.
       const standoff = j.zoom ? 15 : 4;
       const aim = f.x - SPR_W / 2 + (this.dir < 0 ? standoff : -standoff);
-      this.moveToward(aim, 4, dt, minX, maxX);
+      // it creeps when the thing is within reach and scurries after it when it
+      // bolts, which is the only way a stalk keeps up with a fly at full tilt
+      const gone = !j.zoom && Math.abs(f.x - (this.x + SPR_W / 2)) > FLY_FAR;
+      this.moveToward(aim, gone ? 13 : 4, dt, minX, maxX);
       this.frame = Math.floor(t / 0.4) % 2 === 0 ? 'stalkA' : 'stalkB';
     } else if (j.kind === 'wiggle') {
       this.frame = Math.floor(t / 0.11) % 2 === 0 ? 'wiggleA' : 'wiggleB';   // rear lashing

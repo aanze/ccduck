@@ -56,7 +56,9 @@ if you prefer — `cccat`.
   hindquarters, a pause spent staring at you and blinking, then a front paw), purrs,
   meows, and every 2 to 5 minutes gets **the zoomies**: it stalks, wiggles its rear and
   pounces — in an arc, four beats — on something that is not there. When a shower would
-  have fallen on the duck, a **fly** shows up instead, and it never catches that either.
+  have fallen on the duck, a **fly** shows up instead — and it keeps after that one for as long as it stays
+  within reach, bolting at three times its idle speed whenever the cat closes in, until
+  the cat loses interest or it gets away. It never catches it.
   Being on dry land it makes no wake, no splash, and buries its business off screen.
 - Built for the narrow terminal panel of the Claude Code window (56 columns and up, mini
   mode below that), zero dependencies, Node ≥ 18.
@@ -84,7 +86,7 @@ A ready-to-use npm package sits in [`dist/`](dist/) (and is attached to GitHub R
 Download the `.tgz`, then:
 
 ```bash
-npm install -g ./ccduck-2.6.5.tgz
+npm install -g ./ccduck-2.6.6.tgz
 ```
 
 (Frozen copy: to update, reinstall the next version's `.tgz`.)
