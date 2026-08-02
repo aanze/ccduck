@@ -420,6 +420,7 @@ const CAT_LEAP = 0.42;   // how long the cat spends in the air on a pounce
 const TOWER_LEAP = 0.45;
 const WALK_PX = 5.5;             // ground covered by one full four-beat cycle
 const WALK_CYCLE = 0.90;         // ...which is how long that cycle lasts
+const CAT_NAP_FLOOR = 1 / 3;     // naps taken where it stands, not on the tower
 const CAT_NAP_MIN = 30;          // no nap shorter than this: it is a whole trip
 const CAT_NAP_GAP = [120, 210];  // and none for a good while after one
 const RAID_FLAP = ['raidFlapUp', 'raidFlapMid', 'raidFlapDown', 'raidFlapMid'];
@@ -642,6 +643,7 @@ class Duck {
       // happen. And having had one, it is not due another for a couple of
       // minutes — otherwise it spends its life on the ladder.
       a.until = t + (this.pet === 'cat' ? Math.max(CAT_NAP_MIN, nap * 1.35) : nap);
+      a.onFloor = this.pet === 'cat' && Math.random() < CAT_NAP_FLOOR;
       this.maybePurr();
     }
     else if (name === 'quack') {
@@ -692,9 +694,11 @@ class Duck {
     } else if (a.name === 'preen') {
       this.frame = 'preen';
     } else if (a.name === 'sleep') {
-      if (this.pet === 'cat') {
-        // A cat does not sleep just anywhere: it walks to the tower, jumps on
-        // top, curls up. The ui lifts the sprite to the platform (this.tower).
+      if (this.pet === 'cat' && !a.onFloor) {
+        // A cat mostly does not sleep just anywhere: it walks to the tower,
+        // jumps on top, curls up (the ui lifts the sprite to the platform, see
+        // this.tower). But one nap in three it cannot be bothered with the climb
+        // and curls up right where it is standing, which is also what a cat does.
         const twx = towerCatX(this.canvasW);
         if (!a.at) {
           this.frame = 'stand';
@@ -963,7 +967,12 @@ class Duck {
         j.arc = Math.max(4.5, Math.min(8, 3 + Math.abs(j.to - j.from) * 0.22));
         j.missed = false;
         j.beatUntil = t + CAT_LEAP;
-      } else if (j.kind === 'leap') { j.kind = 'land'; j.beatUntil = t + rand(0.25, 0.4); }
+      } else if (j.kind === 'leap') {
+        // touchdown: the arc is over, so put it ON the floor rather than letting
+        // the hop decay bleed off over another two or three frames — that tail
+        // is what read as hanging in the air before landing
+        j.kind = 'land'; this.hop = 0; j.beatUntil = t + rand(0.16, 0.26);
+      }
       else { j.kind = 'stalk'; j.beatUntil = t + rand(0.9, 1.6); }
     }
     this.dir = f.x < this.x + SPR_W / 2 ? -1 : 1;

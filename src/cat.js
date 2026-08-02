@@ -434,7 +434,12 @@ const SPR_CAT = {
     '..mmmMMM.mMM..mm',
     '.WWKWM...WW.....',
   ]),
+  // Shifted down one row from the reference sheet, which left row 11 empty: at
+  // the two ends of the arc the hop is zero and the cat is supposed to be on the
+  // floor, and it hung a pixel above it instead. Row 0 was empty, so this moves
+  // the drawing without changing a pixel of it.
   leap: F([
+    '................',
     '................',
     '.M...M..........',
     '.MMMMM..........',
@@ -446,7 +451,6 @@ const SPR_CAT = {
     '.WM......MMMM...',
     '..........mMMM..',
     '............mW..',
-    '................',
   ]),
   land: F([
     '................',
