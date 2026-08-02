@@ -83,7 +83,7 @@ A ready-to-use npm package sits in [`dist/`](dist/) (and is attached to GitHub R
 Download the `.tgz`, then:
 
 ```bash
-npm install -g ./ccduck-2.5.0.tgz
+npm install -g ./ccduck-2.5.1.tgz
 ```
 
 (Frozen copy: to update, reinstall the next version's `.tgz`.)
@@ -162,7 +162,8 @@ ccduck --edit
 cccat --edit
 ```
 
-Two panels: the pose as the app renders it, and the same pose as its 16×12 grid of
+Two panels: the pose at exactly the size and proportion the app draws it — one column
+per pixel, half a row tall — and the same pose as its 16×12 grid of
 palette letters, with a cursor. Every keystroke redraws both, so the preview *is* the
 edit. Arrows or `hjkl` move, any palette letter paints, `.` or space erases, `tab` and
 `⇧tab` walk through the poses, `x` swaps between the duck's 22 and the cat's 38.

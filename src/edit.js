@@ -69,8 +69,11 @@ function run(opts) {
     else if (sprites.load()[pet] && sprites.load()[pet][name]) scr.text(cols - 22, 0, '● saved override', C.ok);
     else scr.text(cols - 22, 0, '○ default', C.dim);
 
-    // ---- left: the drawing, two columns per pixel so it is not a slit ----
-    const px = 2;
+    // ---- left: the drawing, at the exact proportion the app renders it ----
+    // One sprite pixel is one column wide and half a row tall, so 16x12 becomes
+    // 16 columns by 6 rows. Widening it to two columns per pixel made a roomier
+    // panel and a lie: the cat came out twice as wide as it will ever look.
+    const px = 1;
     const pw = W * px + 4, ph = H / 2 + 2;
     panel(scr, 1, 2, pw, ph, 'preview');
     for (let r = 0; r < H; r += 2) {
