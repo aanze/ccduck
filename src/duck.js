@@ -420,6 +420,11 @@ const CAT_LEAP = 0.42;   // how long the cat spends in the air on a pounce
 const TOWER_LEAP = 0.45;
 const WALK_PX = 5.5;             // ground covered by one full four-beat cycle
 const WALK_CYCLE = 0.90;         // ...which is how long that cycle lasts
+const CAT_GROOM_GAP = [30, 70];   // breathing space after a full session...
+const CAT_GROOM_SCALE = 1.0;      // ...plus this much of however long it lasted
+// The idle lick at the end of a pause is a shorter affair than a full session,
+// so it buys a shorter break.
+const CAT_LICK_GAP = [55, 110];
 const CAT_NAP_FLOOR = 1 / 3;     // naps taken where it stands, not on the tower
 const CAT_NAP_MIN = 30;          // no nap shorter than this: it is a whole trip
 const CAT_NAP_GAP = [120, 210];  // and none for a good while after one
@@ -499,6 +504,7 @@ class Duck {
     this.groom = null;          // cat only: see groomPlan — one full washing routine
     this.nextZoomAt = rand(ZOOM_EVERY[0], ZOOM_EVERY[1]);   // cat only: the zoomies
     this.nextNapAt = 0;         // cat only: not due another nap before this
+    this.nextGroomAt = 0;       // cat only: nor another wash before this
     this.napFrom = null;        // when the nap under way began
   }
 
@@ -588,8 +594,9 @@ class Duck {
           // it crosses the room far less than a duck crosses the pond: what it
           // mostly does is stay put, which is the whole character of the animal
           : n === 'swim' ? Math.max(3, Math.round(w * 0.45)) : n === 'drift' ? Math.round(w * 1.4) : w]);
-      // and no nap at all while the last one is still too recent
+      // and neither a nap nor a wash while the last one is still too recent
       if (t < this.nextNapAt) weights = weights.filter(([n]) => n !== 'sleep');
+      if (t < this.nextGroomAt) weights = weights.filter(([n]) => n !== 'dabble' && n !== 'preen');
     }
     // the camera stare only comes AFTER a stroll: it stops, turns around, stares
     // at us, blinks, lets out a QUACK, then goes back to its business
@@ -1388,11 +1395,21 @@ class Duck {
         const G = cycleLen('gaze');
         if (e < G) this.frame = cycleFrame('gaze', e);
         else if (e < 2 * G) { this.dir = -this.sitDir; this.frame = cycleFrame('gaze', e - G); }
-        else {
+        // Washed recently? Then it just goes on sitting and blinking. Without
+        // this the idle routine washed at the end of EVERY pause, and a cat
+        // pauses constantly — 35% of its life in zen went on washing, which is
+        // what made it look like it did nothing else. The gate is read on the
+        // way IN only (hence sitBeats): re-reading it once the lick is under way
+        // had it set its own cooldown on the first frame and block itself on the
+        // second, so it lasted exactly one image.
+        else if (!this.sitBeats && t < this.nextGroomAt) {
+          this.frame = cycleFrame('gaze', e - 2 * G);
+        } else {
           this.dir = this.sitDir;
           // the same irregular beats a real grooming session uses, so the idle
           // wash does not go back to being a metronome
-          if (!this.sitBeats) this.sitBeats = legBeats('wash', 8);
+          if (!this.sitBeats) { this.sitBeats = legBeats('wash', 8); this.sitGap = rand(CAT_LICK_GAP[0], CAT_LICK_GAP[1]); }
+          this.nextGroomAt = t + this.sitGap;   // counted from the last tick spent washing
           this.frame = beatAt(this.sitBeats, e - 2 * G);
         }
       } else if (blinking) this.frame = 'blink';
@@ -1418,7 +1435,14 @@ class Duck {
     // the grooming routine only exists for as long as the activity that owns it:
     // anything that interrupts (a meal, a raid, an alert) drops it on the spot
     if (this.groom && (t > this.groom.until || this.feeding
-      || !this.act || (this.act.name !== 'dabble' && this.act.name !== 'preen'))) this.groom = null;
+      || !this.act || (this.act.name !== 'dabble' && this.act.name !== 'preen'))) {
+      // A cat that has just spent half a minute washing is done for a while. The
+      // wait scales with how long it went on for, so a thorough session buys a
+      // longer break than a quick lick — without it the shortest gap measured
+      // between two sessions was one second.
+      this.nextGroomAt = t + rand(CAT_GROOM_GAP[0], CAT_GROOM_GAP[1]) + (t - this.groom.t0) * CAT_GROOM_SCALE;
+      this.groom = null;
+    }
 
     this.hop = Math.max(0, this.hop - dt * 6);
     if (this.bubble && t > this.bubble.until) this.bubble = null;
