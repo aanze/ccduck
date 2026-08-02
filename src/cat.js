@@ -646,24 +646,44 @@ const GROOM_CHAIN = 0.8;         // how often a session does both legs
 // reads as a machine: two licks, pause, two licks, pause. Here it is dropped in
 // before a working beat with a probability, so some passes get none, some get
 // two, and it is never in the same place twice running.
+// `lift` is the beat where it stops working: on the hindquarters that is head up
+// and both eyes on whoever is watching, and it holds it for a good two to four
+// seconds — a cat interrupting its own wash to stare at you does not do it in
+// half a second. On the front paw the same beat has its eyes shut, so it is a
+// breath rather than a look, and stays short.
 const GROOM_BEATS = {
   wash: {
     work: [['wash2', 0.35], ['wash3', 0.45], ['wash2', 0.22], ['wash3', 0.40]],
-    lift: ['wash1', 0.55], p: 0.26,
+    lift: 'wash1', hold: [2.0, 4.0],
   },
   lick: {
     work: [['lick2', 0.34], ['lick3', 0.38], ['lick2', 0.26], ['lick3', 0.42]],
-    lift: ['lick1', 0.50], p: 0.26,
+    lift: 'lick1', hold: [0.42, 0.62],
   },
 };
+// How many pauses in a WHOLE leg, not a coin flip at every beat. Rolling per
+// beat meant a long leg practically always had several, and with a stare now
+// lasting seconds that ate two thirds of the wash. Drawn this way, two legs in
+// five have none at all and the licking simply runs on, which is the thing being
+// asked for; the rest get one, occasionally two, dropped at beats picked at
+// random so they are never in the same place.
+const GROOM_LIFTS = [[0, 40], [1, 44], [2, 16]];
 function legBeats(leg, passes, rnd) {
   const r = rnd || Math.random;
   const b = GROOM_BEATS[leg];
+  const beats = [];
+  for (let i = 0; i < passes; i++) for (const beat of b.work) beats.push(beat);
+  let roll = r() * GROOM_LIFTS.reduce((s, [, w]) => s + w, 0);
+  let n = 0;
+  for (const [k, w] of GROOM_LIFTS) { if (roll < w) { n = k; break; } roll -= w; }
+  const at = new Set();
+  while (at.size < Math.min(n, beats.length)) at.add(Math.floor(r() * beats.length));
   const out = [];
-  for (let i = 0; i < passes; i++) for (const beat of b.work) {
-    if (r() < b.p) out.push(b.lift);
+  beats.forEach((beat, i) => {
+    // its own length every time it happens, so two stares are never the same
+    if (at.has(i)) out.push([b.lift, b.hold[0] + r() * (b.hold[1] - b.hold[0])]);
     out.push(beat);
-  }
+  });
   return out;
 }
 const beatsLen = (beats) => beats.reduce((s, [, d]) => s + d, 0);
