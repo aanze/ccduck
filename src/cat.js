@@ -634,36 +634,77 @@ const GROOM_LEGS = { wash: [2, 3], lick: [2, 3] };
 const GROOM_LONG = [4, 10];
 const GROOM_LONG_P = 0.22;
 const GROOM_CHAIN = 0.8;         // how often a session does both legs
+
+// A leg is built beat by beat rather than looped from a fixed table. Each leg
+// has two working poses it alternates between, and one pose where it comes up
+// for air — head raised on the hindquarters, eyes shut on the front paw. Looped,
+// that third pose lands at the same place every single pass, and the whole thing
+// reads as a machine: two licks, pause, two licks, pause. Here it is dropped in
+// before a working beat with a probability, so some passes get none, some get
+// two, and it is never in the same place twice running.
+const GROOM_BEATS = {
+  wash: {
+    work: [['wash2', 0.35], ['wash3', 0.45], ['wash2', 0.22], ['wash3', 0.40]],
+    lift: ['wash1', 0.55], p: 0.26,
+  },
+  lick: {
+    work: [['lick2', 0.34], ['lick3', 0.38], ['lick2', 0.26], ['lick3', 0.42]],
+    lift: ['lick1', 0.50], p: 0.26,
+  },
+};
+function legBeats(leg, passes, rnd) {
+  const r = rnd || Math.random;
+  const b = GROOM_BEATS[leg];
+  const out = [];
+  for (let i = 0; i < passes; i++) for (const beat of b.work) {
+    if (r() < b.p) out.push(b.lift);
+    out.push(beat);
+  }
+  return out;
+}
+const beatsLen = (beats) => beats.reduce((s, [, d]) => s + d, 0);
+// which beat is showing x seconds into a list, looping
+function beatAt(beats, x) {
+  let k = x % beatsLen(beats);
+  for (const [f, d] of beats) { if (k < d) return f; k -= d; }
+  return beats[0][0];
+}
+
 function groomPlan(t, first, rnd) {
   const r = rnd || Math.random;
   const lead = GROOM_LEGS[first] ? first : 'wash';
   const legs = r() < GROOM_CHAIN ? [lead, lead === 'wash' ? 'lick' : 'wash'] : [lead];
   const phases = [];
   let at = t;
+  const push = (beats) => { at += beatsLen(beats); phases.push({ beats, until: at }); };
   legs.forEach((leg, i) => {
     // exactly one pass of the gaze cycle, so all three blinks always play out —
     // a random pause length would cut the last one off half the time
-    if (i) { at += cycleLen('gaze'); phases.push({ cycle: 'gaze', until: at }); }
+    if (i) push(CYCLES.gaze);
     const [lo, hi] = r() < GROOM_LONG_P ? GROOM_LONG : GROOM_LEGS[leg];
-    at += cycleLen(leg) * (lo + Math.floor(r() * (hi - lo + 1)));
-    phases.push({ cycle: leg, until: at });
+    push(legBeats(leg, lo + Math.floor(r() * (hi - lo + 1)), r));
   });
   // A one-leg session often ends on that same pause rather than opening on the
   // next leg — it has finished, and now it is looking at you. Without this the
   // blinking would only ever show on the sessions that do both legs, which is
   // too rare to notice.
-  if (legs.length === 1 && r() < 0.5) { at += cycleLen('gaze'); phases.push({ cycle: 'gaze', until: at }); }
+  if (legs.length === 1 && r() < 0.5) push(CYCLES.gaze);
   return { t0: t, phases, until: at };
 }
-// Each phase restarts its cycle from its own first frame, so a leg always opens
-// on wash1 or lick1 and the pause always opens on an open eye.
+// Each phase runs its own list of beats from its own start, so a leg always
+// opens on a working beat and the pause always opens on an open eye.
 function groomFrame(g, t) {
   let from = g.t0;
   for (const p of g.phases) {
-    if (t < p.until) return cycleFrame(p.cycle, t - from);
+    if (t < p.until) {
+      let x = t - from;
+      for (const [f, d] of p.beats) { if (x < d) return f; x -= d; }
+      return p.beats[p.beats.length - 1][0];
+    }
     from = p.until;
   }
-  return cycleFrame(g.phases[g.phases.length - 1].cycle, t - from);
+  const last = g.phases[g.phases.length - 1].beats;
+  return last[last.length - 1][0];
 }
 
 const TOWER_W = 10;
@@ -681,6 +722,6 @@ function towerPx(H) { return Math.max(4, Math.min(12, H - 8)); }
 function towerCatX() { return Math.max(0, towerBaseX() - 3); }
 
 module.exports = {
-  SPR_CAT, CYCLES, cycleFrame, groomPlan, groomFrame,
+  SPR_CAT, CYCLES, cycleFrame, cycleLen, groomPlan, groomFrame, legBeats, beatAt,
   TOWER_W, towerBaseX, towerPx, towerCatX,
 };

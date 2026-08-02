@@ -49,8 +49,9 @@ if you prefer — `cccat`.
   splashing everywhere — 10 s at most, repeatable while the rain lasts but never twice in
   a row without a 30 s break.
 - **Or a cat** (`cccat`, or the `x` key): the same engine frame for frame, different
-  drawings and a few habits of its own. It saunters instead of paddling, naps twice as often
-  as the duck and half again as long, and does it curled up on a **cat tower** it
+  drawings and a few habits of its own. It saunters instead of paddling — and mostly does not, spending its time sitting,
+  grooming or asleep — naps twice as often as the duck, never for less than 30 s and
+  never twice inside two minutes, and does it curled up on a **cat tower** it
   reaches with a wiggle and a leap, grooms itself in full sessions (several cycles on the
   hindquarters, a pause spent staring at you and blinking, then a front paw), purrs,
   meows, and every 2 to 5 minutes gets **the zoomies**: it stalks, wiggles its rear and
@@ -83,7 +84,7 @@ A ready-to-use npm package sits in [`dist/`](dist/) (and is attached to GitHub R
 Download the `.tgz`, then:
 
 ```bash
-npm install -g ./ccduck-2.5.1.tgz
+npm install -g ./ccduck-2.6.0.tgz
 ```
 
 (Frozen copy: to update, reinstall the next version's `.tgz`.)

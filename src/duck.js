@@ -29,7 +29,7 @@ const PAL = {
   N: 0xC7A87F, // cat tower wood
   n: 0x9A7B54, // cat tower wood, dark
 };
-const { SPR_CAT, cycleFrame, groomPlan, groomFrame, towerCatX } = require('./cat');
+const { SPR_CAT, cycleFrame, cycleLen, groomPlan, groomFrame, legBeats, beatAt, towerCatX } = require('./cat');
 
 const SEED = 0xD9B44A;
 const PILL_A = 0xFF5A5A; // two-tone pill
@@ -418,6 +418,10 @@ const CAT_LEAP = 0.42;   // how long the cat spends in the air on a pounce
 // The hop onto the tower. 0.28 s is three frames at ten a second — the leap
 // drawing barely registered before the cat was already curled up on top.
 const TOWER_LEAP = 0.45;
+const WALK_PX = 5.5;             // ground covered by one full four-beat cycle
+const WALK_CYCLE = 0.90;         // ...which is how long that cycle lasts
+const CAT_NAP_MIN = 30;          // no nap shorter than this: it is a whole trip
+const CAT_NAP_GAP = [120, 210];  // and none for a good while after one
 const RAID_FLAP = ['raidFlapUp', 'raidFlapMid', 'raidFlapDown', 'raidFlapMid'];
 const CAT_RAID_FLAP = ['raidFlapUp', 'raidLow'];
 // The zoomies: every few minutes the cat decides something is there, and hunts
@@ -493,6 +497,8 @@ class Duck {
     this.fly = null;            // cat only: {x, y, vx, vy} — the fly it will never catch
     this.groom = null;          // cat only: see groomPlan — one full washing routine
     this.nextZoomAt = rand(ZOOM_EVERY[0], ZOOM_EVERY[1]);   // cat only: the zoomies
+    this.nextNapAt = 0;         // cat only: not due another nap before this
+    this.napFrom = null;        // when the nap under way began
   }
 
   say(text, style, durSec) {
@@ -577,7 +583,12 @@ class Duck {
     // left at the duck's weights it would spend 43% of its life washing.
     if (this.pet === 'cat' && !breakMode) {
       weights = weights.map(([n, w]) => [n,
-        n === 'sleep' ? w * 2 : (n === 'dabble' || n === 'preen') ? Math.max(2, Math.round(w * 0.3)) : w]);
+        n === 'sleep' ? w * 2 : (n === 'dabble' || n === 'preen') ? Math.max(2, Math.round(w * 0.3))
+          // it crosses the room far less than a duck crosses the pond: what it
+          // mostly does is stay put, which is the whole character of the animal
+          : n === 'swim' ? Math.max(3, Math.round(w * 0.45)) : n === 'drift' ? Math.round(w * 1.4) : w]);
+      // and no nap at all while the last one is still too recent
+      if (t < this.nextNapAt) weights = weights.filter(([n]) => n !== 'sleep');
     }
     // the camera stare only comes AFTER a stroll: it stops, turns around, stares
     // at us, blinks, lets out a QUACK, then goes back to its business
@@ -601,7 +612,14 @@ class Duck {
       // a cat saunters, it does not paddle: slower, and it stops to think
       if (this.pet === 'cat') { a.speed *= 0.55; a.until = t + rand(4, 9); }
       a.until = t + rand(3, 7);
-    } else if (name === 'drift') { a.x = this.x + rand(-6, 6); a.speed = 1.2; a.until = t + rand(3, 7); }
+    } else if (name === 'drift') {
+      a.x = this.x + rand(-6, 6); a.speed = 1.2; a.until = t + rand(3, 7);
+      // A duck drifts on the current. A cat just stops where it is — which is
+      // what hands it over to the sit-blink-look-wash routine in update(), and
+      // is the difference between an animal that settles and one that shuffles
+      // about the room getting nowhere.
+      if (this.pet === 'cat') { a.x = this.x; a.speed = 0; a.until = t + rand(15, 26); }
+    }
     else if (name === 'dabble' || name === 'preen') {
       a.until = t + (name === 'dabble' ? rand(1.6, 3) : rand(1.8, 3.2));
       // the cat neither dabbles nor preens: each name stands for one leg of its
@@ -619,7 +637,11 @@ class Duck {
     else if (name === 'sleep') {
       // a cat naps longer than a duck, on top of napping more often
       const nap = mode === 'zen' ? rand(6, 60) : rand(3.5, 30);
-      a.until = t + (this.pet === 'cat' ? nap * 1.35 : nap);
+      // A cat that climbs its tower, curls up for five seconds and comes back
+      // down looks broken, not sleepy: a nap is worth the trip or it does not
+      // happen. And having had one, it is not due another for a couple of
+      // minutes — otherwise it spends its life on the ladder.
+      a.until = t + (this.pet === 'cat' ? Math.max(CAT_NAP_MIN, nap * 1.35) : nap);
       this.maybePurr();
     }
     else if (name === 'quack') {
@@ -827,6 +849,7 @@ class Duck {
     const t = this.t;
     if (this.pet !== 'cat' || t < this.nextZoomAt) return;
     if (this.joy || this.rain || this.feeding || this.beg || this.raid || this.tower) return;
+    if (this.act && this.act.name === 'sleep') return;   // let it sleep
     if (POSE_FRAMES.has(this.frame)) return;
     const w = Math.max(6, maxX - minX);
     this.fly = { x: minX + Math.random() * w, y: rand(2, 5), vx: 0, vy: 0, ghost: true };
@@ -1313,6 +1336,22 @@ class Duck {
 
     // walk frames: only meaningful when it actually moved this tick
     this.moving = Math.abs(this.x - xBefore) > 0.02;
+    // ...and they are driven by GROUND COVERED, not by the clock. A cat saunters
+    // at a third of the duck's pace, so a time-based cycle had its legs going at
+    // full tilt while it barely advanced — pedalling on the spot. One full
+    // four-beat cycle per WALK_PX pixels means the paws land where they look.
+    this.walked = (this.walked || 0) + Math.abs(this.x - xBefore);
+
+    // The gap between naps is counted from when one actually ENDS, and only if
+    // it was a real nap. Counting from the planned end punished a nap that
+    // hunger cut short after a second: it never slept, and was then barred from
+    // trying again for two minutes.
+    const napping = !!(this.act && this.act.name === 'sleep');
+    if (napping && this.napFrom == null) this.napFrom = t;
+    if (!napping && this.napFrom != null) {
+      if (this.pet === 'cat') this.nextNapAt = t + rand(CAT_NAP_GAP[0], CAT_NAP_GAP[1]);
+      this.napFrom = null;
+    }
 
     // Idle life for a held standing pose. The blink used to live inside
     // runIdleLife, so it stopped the moment anything else took the frames over —
@@ -1322,7 +1361,7 @@ class Duck {
     // wherever the pose came from. And a cat left standing for several seconds
     // does not stand: it sits down.
     if (this.frame === 'stand' && !this.moving) {
-      if (this.stillSince == null) { this.stillSince = t; this.sitAfter = rand(1.8, 3.5); }
+      if (this.stillSince == null) { this.stillSince = t; this.sitAfter = rand(1.8, 3.5); this.sitDir = this.dir; this.sitBeats = null; }
     } else this.stillSince = null;
     // once every 2.5 s or so rather than every 4: at ten frames a second a blink
     // is three frames, and the gaps between them were what read as a freeze
@@ -1330,10 +1369,23 @@ class Duck {
     const blinking = t < this.blinkUntil;
     if (this.frame === 'stand') {
       if (this.pet === 'cat' && this.stillSince != null && t - this.stillSince > this.sitAfter) {
-        // the same sit-and-blink cycle the grooming pause uses, rather than a
-        // random blink: it guarantees one about every 1.4 s, where waiting on a
-        // die roll left gaps of eight seconds with nothing moving at all
-        this.frame = cycleFrame('gaze', t - this.stillSince - this.sitAfter);
+        // A cat with nothing to do has a routine, and this is it: sit down and
+        // blink a while, look the other way and blink some more, then start
+        // washing. The gaze cycle guarantees a blink every 1.4 s or so, where
+        // waiting on a die roll once left eight seconds of nothing moving.
+        // "Looking the other way" is the mirror flag — the drawing is the same
+        // one, facing the other side, which is exactly what a cat does.
+        const e = t - this.stillSince - this.sitAfter;
+        const G = cycleLen('gaze');
+        if (e < G) this.frame = cycleFrame('gaze', e);
+        else if (e < 2 * G) { this.dir = -this.sitDir; this.frame = cycleFrame('gaze', e - G); }
+        else {
+          this.dir = this.sitDir;
+          // the same irregular beats a real grooming session uses, so the idle
+          // wash does not go back to being a metronome
+          if (!this.sitBeats) this.sitBeats = legBeats('wash', 8);
+          this.frame = beatAt(this.sitBeats, e - 2 * G);
+        }
       } else if (blinking) this.frame = 'blink';
     }
 
@@ -1377,7 +1429,7 @@ class Duck {
     // the drawing decides how it moves. Walking, washing, licking and the alert
     // meow all say nothing as a still image.
     if (cat) {
-      if (name === 'stand' && this.moving) name = cycleFrame('walk', this.t);
+      if (name === 'stand' && this.moving) name = cycleFrame('walk', (this.walked / WALK_PX) * WALK_CYCLE);
       // the engine says 'dabble' both for foraging and for eating: a cat washes
       // itself in the first case and puts its head to the floor in the second
       else if (this.groom && !this.feeding && (name === 'dabble' || name === 'preen')) {
