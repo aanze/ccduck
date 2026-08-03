@@ -4,7 +4,7 @@
 const { Screen, colorMode, term } = require('./ansi');
 const { load } = require('./config');
 const { DataStore } = require('./data');
-const { Duck } = require('./duck');
+const { Duck, applySkin, skinNames } = require('./duck');
 const update = require('./update');
 const sprites = require('./sprites');
 const ui = require('./ui');
@@ -108,6 +108,10 @@ async function run(argv) {
   if (opts.autoReauth) cfg.autoReauth = true;
   if (opts.pet) cfg.pet = opts.pet;        // --cat / --duck win over the config file
   if (opts.alerts === false) cfg.alerts = false;
+  // both coats are applied up front: the letters do not overlap, so swapping the
+  // animal with `x` shows its own skin with nothing left to redo
+  cfg.duckSkin = applySkin('duck', cfg.duckSkin);
+  cfg.catSkin = applySkin('cat', cfg.catSkin);
   let metric = METRICS.includes(opts.metric) ? opts.metric : (METRICS.includes(cfg.metric) ? cfg.metric : 'cost');
   const mode = colorMode(process.env, opts.noColor ? '256' : null);
   const isTTY = !!process.stdout.isTTY;
@@ -301,6 +305,14 @@ async function run(argv) {
       else if (k === 'f' || k === 'F') { duck.feed(); }
       else if (k === 's' || k === 'S') { duck.dropPill(); }
       else if (k === 'c' || k === 'C') { showTable = !showTable; }
+      else if (k === 'k' || k === 'K') {
+        // next coat for whichever animal is out. Session only: set "duckSkin" /
+        // "catSkin" in ~/.ccduck.json to make it permanent.
+        const names = skinNames(duck.pet);
+        const key = duck.pet === 'cat' ? 'catSkin' : 'duckSkin';
+        cfg[key] = names[(Math.max(0, names.indexOf(cfg[key])) + 1) % names.length];
+        applySkin(duck.pet, cfg[key]);
+      }
       else if (k === 'x' || k === 'X') {
         // swap the animal: same behaviours, different drawings. Session only —
         // set "pet": "cat" in ~/.ccduck.json to make it permanent.

@@ -499,6 +499,7 @@ function draw(scr, state) {
   } else {
     const keys = '[q]uit [f]eed [s]edate [r]efresh [m]etric:' + ui.metricLabel + ' [c]table [d]emo'
       + ' [x]pet:' + (state.duckInfo.pet === 'cat' ? 'cat' : 'duck')
+      + ' [k]skin:' + (state.duckInfo.pet === 'cat' ? (cfg.catSkin || 'brown') : (cfg.duckSkin || 'classic'))
       + ' [z]alerts:' + (cfg.alerts === false ? 'off' : 'on')
       + ' [a]uth:' + (cfg.autoReauth ? 'auto' : 'off') + (ui.paused ? ' ▮▮' : '');
     const bits = [];

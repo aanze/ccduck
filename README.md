@@ -86,7 +86,7 @@ A ready-to-use npm package sits in [`dist/`](dist/) (and is attached to GitHub R
 Download the `.tgz`, then:
 
 ```bash
-npm install -g ./ccduck-2.7.0.tgz
+npm install -g ./ccduck-2.8.0.tgz
 ```
 
 (Frozen copy: to update, reinstall the next version's `.tgz`.)
@@ -249,6 +249,8 @@ to raw tokens.
 | `p` / space | pause |
 | `u` | install the update when the header offers one |
 | `a` | auto-reauth: renew the expired token yourself, or not (default: not) |
+| `x` | swap the animal: duck ⇄ cat |
+| `k` | next skin for whichever animal is out — duck `classic`/`green`, cat `brown`/`grey` |
 
 ## Updates
 
@@ -339,6 +341,8 @@ Optional file, to be created in your home folder. Everything in it is optional:
 | `planLabel` | label shown in the header (e.g. `"Max 20x"`) |
 | `premiumFamily` | `auto` (fable if used, opus otherwise), `fable` or `opus` |
 | `premiumShare` | share of the weekly envelope allocated to the premium model, for the estimation formula (default `0.5`) |
+| `pet` | `duck` (default) or `cat` — which animal lives in the panel (the `x` key) |
+| `duckSkin` / `catSkin` | coat colours, drawings unchanged: `classic`/`green` and `brown`/`grey` (the `k` key). A skin only remaps palette letters — the beak, eyes, white paws and the tower's wood stay put, because that is what the coat is read against |
 | `weeklyReset` | weekly reset day/hour (`weekday`: 0 = Sunday … 6 = Saturday) — only useful when Claude Code's official cache is missing; otherwise the official reset is used automatically |
 | `limits.*` | in **API-equivalent dollars**, or `"auto"` (historical peak) — only used by the estimated `≈` gauges |
 | `checkUpdates` | `true` by default: checks twice a day whether a newer version exists. `false` disables every call to GitHub |

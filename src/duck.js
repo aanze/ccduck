@@ -29,6 +29,37 @@ const PAL = {
   N: 0xC7A87F, // cat tower wood
   n: 0x9A7B54, // cat tower wood, dark
 };
+// Skins. A skin is a colour mapping and nothing else: the drawings never change,
+// only which colour each palette letter stands for. The duck's letters (Y H y)
+// and the cat's (M m T) do not overlap, so both animals keep their own skin at
+// the same time and swapping with `x` shows the right one straight away.
+// Whites (W w), eyes (K), beak (O o) and the tower's wood (N n) stay put: they
+// are what the coat is read against, and recolouring them loses the animal.
+const PAL_BASE = { ...PAL };
+const SKINS = {
+  duck: {
+    classic: {},                                            // the yellow rubber duck
+    green: { Y: 0x57C24A, H: 0x8FE07C, y: 0x2F7D3A },       // body, highlight, wing shadow
+  },
+  cat: {
+    brown: {},                                              // tabby: the one drawn from
+    grey: { M: 0x6E6E6E, m: 0x424242, T: 0x9A9A9A },        // coat, stripes, belly
+  },
+};
+// pure greys on purpose: equal RGB lands on the 256-colour grey ramp, which is
+// far finer than the colour cube, so the shading survives on a 256-colour term
+const skinNames = (pet) => Object.keys(SKINS[pet] || {});
+function applySkin(pet, name) {
+  const set = SKINS[pet];
+  if (!set) return null;
+  const chosen = set[name] ? name : skinNames(pet)[0];
+  // every letter any skin of this animal touches goes back to its drawn value
+  // first, so skins never leak into one another
+  for (const over of Object.values(set)) for (const L of Object.keys(over)) PAL[L] = PAL_BASE[L];
+  Object.assign(PAL, set[chosen]);
+  return chosen;
+}
+
 const { SPR_CAT, cycleFrame, cycleLen, groomPlan, groomFrame, legBeats, beatAt, towerCatX } = require('./cat');
 
 const SEED = 0xD9B44A;
@@ -1593,4 +1624,4 @@ class Duck {
   }
 }
 
-module.exports = { Duck, SPR, PAL, SPR_W, SPR_H, SEED, PILL_A, PILL_B, POOP, POOP_TOP, POOP_OLD, POOP_LIFE, CURRENT, BITE_REGEN };
+module.exports = { Duck, SPR, PAL, SKINS, skinNames, applySkin, SPR_W, SPR_H, SEED, PILL_A, PILL_B, POOP, POOP_TOP, POOP_OLD, POOP_LIFE, CURRENT, BITE_REGEN };
