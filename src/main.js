@@ -30,6 +30,7 @@ Usage: ccduck [options]
 
 Keys  : [q] quit  [f] feed  [s] sleeping pill (5 min)  [r] refresh  [m] metric  [c] table  [d] demo  [p] pause
         [x] swap duck and cat for this session
+        [k] next coat: duck classic/green, cat brown/grey — colours only
         [z] alerts off: it stops watching the gauges entirely, and just lives
         [u] install the update when one is offered in the header
         [a] toggle auto-reauth (off by default: ccduck only reads the token file)
