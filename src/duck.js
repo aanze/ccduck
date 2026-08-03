@@ -734,8 +734,11 @@ class Duck {
         }
         this.dir = -1;                // facing the tower, which is to its left
         const e = t - a.at;
-        // it gathers itself where it stands — rear wiggling — then leaps
-        if (e < 0.45) { this.x = a.launchX; this.frame = Math.floor(t / 0.12) % 2 === 0 ? 'wiggleA' : 'wiggleB'; return; }
+        // It gathers itself where it stands, then leaps. It does NOT waggle its
+        // rear: that lashing belongs to the hunt, where it is loading a spring
+        // at live prey. Going to bed, a cat simply crouches and holds it — so
+        // this is one still pose, not the two-frame alternation.
+        if (e < 0.45) { this.x = a.launchX; this.frame = 'wiggleA'; return; }
         if (!this.tower) this.tower = { phase: 'up', t0: t };          // leap!
         if (this.tower.phase === 'up') {
           // horizontal travel is linear across the whole hop; the height is
