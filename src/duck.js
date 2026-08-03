@@ -377,7 +377,9 @@ const WATER = 0x7FD4F5;
 // The duck does not comment on what it does: onomatopoeia only.
 // Only limit warnings (alert/panic) are allowed actual words.
 const QUACKS = ['quack', 'quack quack', 'squeak', 'wak wak'];
-const ZENS = ['zzz…', 'quack… zzz'];
+// Drowsy, but still awake and standing: no 'zzz' here. Sleeping noises belong to
+// the sleep pose alone — saying them mid-stroll read as a bug, because it is one.
+const ZENS = ['quack…', 'quack', 'wak…'];
 const NOMS = ['nom nom nom', 'crunch crunch', '♥'];
 
 // Activities that change the silhouette markedly. Chaining two of these poses
@@ -1478,7 +1480,17 @@ class Duck {
           this.dir = this.sitDir;
           // the same irregular beats a real grooming session uses, so the idle
           // wash does not go back to being a metronome
-          if (!this.sitBeats) { this.sitBeats = legBeats('wash', 8); this.sitGap = rand(CAT_LICK_GAP[0], CAT_LICK_GAP[1]); }
+          // Which leg: the idle wash used to be hardcoded to the hindquarters,
+          // so the front paw never showed at all — this routine fires constantly
+          // and, by pushing nextGroomAt forward on every washing tick, it also
+          // starves the full grooming session that was the only other way in.
+          // Alternating leads means the paw actually gets its turn.
+          if (!this.sitBeats) {
+            const leg = Math.random() < (this.sitLastLeg === 'lick' ? 0.25 : 0.55) ? 'lick' : 'wash';
+            this.sitLastLeg = leg;
+            this.sitBeats = legBeats(leg, 8);
+            this.sitGap = rand(CAT_LICK_GAP[0], CAT_LICK_GAP[1]);
+          }
           this.nextGroomAt = t + this.sitGap;   // counted from the last tick spent washing
           this.frame = beatAt(this.sitBeats, e - 2 * G);
         }
