@@ -516,6 +516,13 @@ function draw(scr, state) {
     if (snap.officialErr && usageAge > 8 * 60) bits.push('usage: ' + snap.officialErr);
     const lim = bits.join(' · ');
     scr.text(1, fy, clip(keys + '  ·  ' + lim, cols - 2), C.faint);
+    // a toggle was just written to the config: two seconds at the end of the
+    // line, so you know it will still be there next launch
+    if (ui.saved) {
+      const tag = ' ' + ui.saved + ' ';
+      scr.text(Math.max(1, cols - 1 - tag.length), fy, tag,
+        ui.saved === 'saved' ? C.green : C.red, null, A_REV);
+    }
   }
   return geo;
 }

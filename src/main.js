@@ -2,7 +2,7 @@
 // Orchestration: animation loop, incremental scan, keyboard, CLI modes.
 
 const { Screen, colorMode, term } = require('./ansi');
-const { load } = require('./config');
+const { load, save } = require('./config');
 const { DataStore } = require('./data');
 const { Duck, applySkin, skinNames } = require('./duck');
 const update = require('./update');
@@ -29,11 +29,13 @@ Usage: ccduck [options]
   --help, --version
 
 Keys  : [q] quit  [f] feed  [s] sleeping pill (5 min)  [r] refresh  [m] metric  [c] table  [d] demo  [p] pause
-        [x] swap duck and cat for this session
+        [x] swap duck and cat
         [k] next coat: duck classic/green, cat brown/grey — colours only
         [z] alerts off: it stops watching the gauges entirely, and just lives
         [u] install the update when one is offered in the header
         [a] toggle auto-reauth (off by default: ccduck only reads the token file)
+        m, c, x, k, z and a are written to the config: still there next launch.
+        The flags above are not — they override it for that run only.
 Config: ~/.ccduck.json (limits, thresholds, weekly reset… see README)
 
 Tuning  the rare behaviours are on long timers; these shorten them, in seconds:
@@ -253,6 +255,16 @@ async function run(argv) {
   let quitting = false;
 
   const refreshSnap = () => { snap = store.snapshot(Date.now(), metric); };
+  // Every toggle reachable from the keyboard is written back to the config, so
+  // the coat, the metric or auto-reauth you picked is still there next launch.
+  // Not the momentary ones — pause, demo, feed — they mean nothing outside the
+  // run. `saved` flashes "saved" in the footer for two seconds; when the write
+  // fails (read-only home) it says so instead of pretending, and the toggle
+  // simply lasts the session.
+  let saved = null;
+  const keep = (key, value) => {
+    saved = { ok: save(cfg, key, value), until: Date.now() + 2000 };
+  };
   // Official counters: the real interval lives in refreshOfficial (2 min,
   // backoff on 429) — here we just poke it regularly.
   const pokeOfficial = (force) => {
@@ -302,38 +314,42 @@ async function run(argv) {
         if (!pendingScan) pendingScan = store.scanSteps();
         pokeOfficial(true); // r = I want the real numbers now
       }
-      else if (k === 'm' || k === 'M') { metric = METRICS[(METRICS.indexOf(metric) + 1) % METRICS.length]; refreshSnap(); }
+      else if (k === 'm' || k === 'M') {
+        metric = METRICS[(METRICS.indexOf(metric) + 1) % METRICS.length];
+        keep('metric', metric);
+        refreshSnap();
+      }
       else if (k === 'f' || k === 'F') { duck.feed(); }
       else if (k === 's' || k === 'S') { duck.dropPill(); }
-      else if (k === 'c' || k === 'C') { showTable = !showTable; }
+      else if (k === 'c' || k === 'C') { showTable = !showTable; keep('showTable', showTable); }
       else if (k === 'k' || k === 'K') {
-        // next coat for whichever animal is out. Session only: set "duckSkin" /
-        // "catSkin" in ~/.ccduck.json to make it permanent.
+        // next coat for whichever animal is out
         const names = skinNames(duck.pet);
         const key = duck.pet === 'cat' ? 'catSkin' : 'duckSkin';
         cfg[key] = names[(Math.max(0, names.indexOf(cfg[key])) + 1) % names.length];
         applySkin(duck.pet, cfg[key]);
+        keep(key, cfg[key]);
       }
       else if (k === 'x' || k === 'X') {
-        // swap the animal: same behaviours, different drawings. Session only —
-        // set "pet": "cat" in ~/.ccduck.json to make it permanent.
+        // swap the animal: same behaviours, different drawings
         duck.pet = duck.pet === 'cat' ? 'duck' : 'cat';
         duck.tower = null;
+        keep('pet', duck.pet);
       }
       else if (k === 'a' || k === 'A') {
         // toggles between "wait for Claude Code to renew" (default) and
-        // "ccduck renews the expired token itself". Session only: to make it
-        // permanent, set "autoReauth": true in ~/.ccduck.json
+        // "ccduck renews the expired token itself"
         cfg.autoReauth = !cfg.autoReauth;
         store.reauthBlockedUntil = 0;
+        keep('autoReauth', cfg.autoReauth);
         if (cfg.autoReauth) pokeOfficial(true);
       }
       else if (k === 'z' || k === 'Z') {
         // the animal stops watching the gauges altogether: no pointing, no
-        // panic, no markers, everything else as usual. Session only: to make it
-        // permanent, set "alerts": false in ~/.ccduck.json
+        // panic, no markers, everything else as usual
         cfg.alerts = cfg.alerts === false;
         duck.phase = null;                 // drop a pointing burst in progress
+        keep('alerts', cfg.alerts);
         refreshSnap();
       }
       else if (k === 'u' || k === 'U') {
@@ -394,6 +410,7 @@ async function run(argv) {
         demoLabel: demo == null ? '' : 'DEMO' + (typeof demo === 'number' ? ' ' + demo + '%' : ''),
         loading, paused, showTable, metricLabel: METRIC_LABELS[metric], version: VERSION,
         update: updateTo,
+        saved: saved && saved.until > now ? (saved.ok ? 'saved' : 'not saved') : null,
       },
     });
     const frame = screen.render();

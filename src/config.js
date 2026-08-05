@@ -60,6 +60,44 @@ function load(overridePath) {
   return cfg;
 }
 
+// Writes ONE setting back to ~/.ccduck.json, so a coat, a metric or an
+// auto-reauth chosen with a key is still there at the next launch.
+//
+// Only the key that changed is touched: everything else in the file stays
+// exactly as the user wrote it, and the CLI flags (--cat, --metric, --no-alerts)
+// stay run-only because they never come through here. A value back at its
+// default drops out of the file instead of being pinned, so a later change of
+// default still reaches the user.
+//
+// Never blocking: a read-only home just means the toggle lasts the session.
+function save(cfg, key, value) {
+  const p = (cfg && cfg.configPath) || configPath();
+  let cur = {}, raw = null;
+  try {
+    raw = fs.readFileSync(p, 'utf8');
+  } catch (e) {
+    if (e.code !== 'ENOENT') return false;
+  }
+  if (raw != null) {
+    // Re-read at write time rather than keeping the copy loaded at startup:
+    // another instance may have saved since, and its keys must survive.
+    // Unparsable = hand-edited and broken; we do not overwrite blind.
+    try { cur = JSON.parse(raw); } catch (e) { return false; }
+    if (!cur || typeof cur !== 'object' || Array.isArray(cur)) return false;
+  }
+  if (JSON.stringify(value) === JSON.stringify(DEFAULTS[key])) delete cur[key];
+  else cur[key] = value;
+  const tmp = p + '.tmp';
+  try {
+    fs.writeFileSync(tmp, JSON.stringify(cur, null, 2) + '\n');
+    fs.renameSync(tmp, p);          // atomic: nobody ever reads a half-written config
+    return true;
+  } catch (e) {
+    try { fs.unlinkSync(tmp); } catch (e2) { /* ignore */ }
+    return false;
+  }
+}
+
 // Claude Code data folders to scan.
 function claudeProjectDirs(env) {
   const dirs = [];
@@ -70,4 +108,4 @@ function claudeProjectDirs(env) {
   return dirs.filter((d) => { try { return fs.statSync(d).isDirectory(); } catch (e) { return false; } });
 }
 
-module.exports = { load, DEFAULTS, PRICING, claudeProjectDirs, configPath };
+module.exports = { load, save, DEFAULTS, PRICING, claudeProjectDirs, configPath };

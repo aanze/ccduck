@@ -4,7 +4,7 @@ Your Claude Code limits as live gauges in the terminal — with a pixel-art duck
 living its own life underneath them and panicking when you get close.
 
 ```
- CCDUCK  v2.9.1 Claude tokens                             21:34:07 · usage 2min
+ CCDUCK  v2.9.2 Claude tokens                             21:34:07 · usage 2min
  ─────────────────────────────────────────────────────────────────────────────
  SESSION 5h ████████████████████▊·············  46% • $137 · 118M      ↺ 3h10
  WEEK       ███████████████████████████·······  60% • $870 · 791M      ↺ 2d13h
@@ -40,7 +40,9 @@ Command not found: check that npm's global folder (`npm prefix -g`, typically
 
 ## Keys
 
-Everything a key toggles is session only; the config file makes it permanent.
+`m`, `c`, `x`, `k`, `z` and `a` are written straight to `~/.ccduck.json` — pick a coat once
+and it is still there next launch. The flags below are not: they override the config for
+that run only.
 
 | Key | Action |
 |---|---|
