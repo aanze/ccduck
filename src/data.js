@@ -814,10 +814,6 @@ class DataStore {
     let anchorPrem = null;
     if (!offPrem && od.premium && od.premium.reset > now && od.premium.pct > 0 && od.fetchedAt > 0) {
       anchorPrem = od.premium.pct * 100;
-      const ratio = (s7 && api7 && api7.pct > 0 && s7.at > od.fetchedAt) ? s7.pct / api7.pct : 1;
-      if (premCostBetween(od.fetchedAt, now) > 0 && isFinite(ratio) && ratio > 1 && ratio < 3) {
-        anchorPrem = Math.min(100, anchorPrem * ratio);
-      }
     }
     if (off5) {
       push('session', 'SESSION 5h', estBlockVal, estBlockCost, estBlockTok, null,
@@ -841,27 +837,32 @@ class DataStore {
         official: !premEstimated, pct: offPrem.pct * 100,
         resetSec: (offPrem.reset - now) / 1000, resetText: null,
       });
-    } else if (anchorPrem != null) {
-      // Anchored on the last official reading of the premium bucket, however old:
-      // it gives the quota in cost (quota = premium_cost_at_T / percentage_at_T),
-      // then we apply the premium cost consumed over a rolling 7 days today.
-      // Immune to a model switch: move to Opus and the premium consumption
-      // flatlines, so the gauge stays put, unlike a rule of three on the global
-      // weekly.
-      meters.push({
-        key: 'premium', label: premiumFam.toUpperCase() + ' 7d',
-        used: premium.val, tokens: premTok, limit: null, auto: true, official: false,
-        pct: anchorPrem, resetSec: reset7 ? (reset7 - now) / 1000 : null, resetText: null,
-      });
-    } else if (off7 && roll.tot > 0) {
-      // With no official premium reading: fall back to the cccat formula, in
-      // weighted cost (a Fable token weighs ~2x an Opus token in the quota).
+    } else if (off7 && roll.totCost > 0) {
+      // No fresh reading of the bucket: the cccat formula, in weighted cost (a
+      // Fable token weighs ~2x an Opus token in the quota). It reads the model
+      // mix off the transcripts, so it follows a switch of model straight away.
+      //
+      // This is deliberately preferred over ageing the last official reading.
+      // Scaling that reading by the global weekly's growth assumes premium usage
+      // grows like everything else, which is false exactly when it matters —
+      // measured here: a 3 % reading times a weekly that went 6 → 14 % displayed
+      // 7 % for a real 11 %, because the session in between was nearly all
+      // premium. The formula gave 11.3 %. The same rule of three had already
+      // been caught overshooting the other way (100 % shown for a real 86 %).
       const share = cfg.premiumShare > 0 ? cfg.premiumShare : 0.5;
       const pct = Math.min(100, ((roll.premCost / roll.totCost) * off.u7d / share) * 100);
       meters.push({
         key: 'premium', label: premiumFam.toUpperCase() + ' 7d',
         used: premium.val, tokens: premTok, limit: null, auto: true, official: false,
         pct, resetSec: reset7 ? (reset7 - now) / 1000 : null, resetText: null,
+      });
+    } else if (anchorPrem != null) {
+      // Last resort, with no transcripts to read a mix off: the last official
+      // reading as it was measured, unscaled. Old, but at least it was true once.
+      meters.push({
+        key: 'premium', label: premiumFam.toUpperCase() + ' 7d',
+        used: premium.val, tokens: premTok, limit: null, auto: true, official: false,
+        pct: anchorPrem, resetSec: reset7 ? (reset7 - now) / 1000 : null, resetText: null,
       });
     } else {
       unknown('premium', premiumFam.toUpperCase() + ' 7d', premium.val, premTok,
@@ -924,4 +925,4 @@ class DataStore {
   }
 }
 
-module.exports = { DataStore, familyOf, entryCost, entryMetric, readOAuthCreds, readPlanUsage, planUsageDirs, planUsageFiles };
+module.exports = { DataStore, familyOf, entryCost, entryMetric, readOAuthCreds, readPlanUsage, planUsageDirs, planUsageFiles, getAgent };

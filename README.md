@@ -4,7 +4,7 @@ Your Claude Code limits as live gauges in the terminal — with a pixel-art duck
 living its own life underneath them and panicking when you get close.
 
 ```
- CCDUCK  v2.8.4 Claude tokens                             21:34:07 · usage 2min
+ CCDUCK  v2.9.0 Claude tokens                             21:34:07 · usage 2min
  ─────────────────────────────────────────────────────────────────────────────
  SESSION 5h ████████████████████▊·············  46% • $137 · 118M      ↺ 3h10
  WEEK       ███████████████████████████·······  60% • $870 · 791M      ↺ 2d13h

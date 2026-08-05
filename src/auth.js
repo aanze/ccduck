@@ -47,6 +47,11 @@ function post(body, timeoutMs) {
       host: HOST,
       path: TOKEN_PATH,
       method: 'POST',
+      // Same agent as the usage calls: fresh connection, plus the system CA
+      // store. Behind a corporate proxy that re-signs TLS, Node's bundled roots
+      // do not know the issuer and the renewal died on
+      // UNABLE_TO_GET_ISSUER_CERT_LOCALLY while the gauges kept working.
+      agent: require('./data').getAgent(),
       headers: {
         'Content-Type': 'application/json',
         'Accept': 'application/json',
