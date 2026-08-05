@@ -126,7 +126,7 @@ function drawMeter(scr, y, m, L, cfg, blinkOn, isWorst, bites, t) {
       scr.text(x, y, padR(clip('no official data', L.figsW), L.figsW), C.faint);
       x += L.figsW + 1;
     }
-    const rst = m.resetSec != null ? '↺ ' + fmtDur(m.resetSec) : '';
+    const rst = m.resetSec != null ? (m.resetEst ? '≈ ' : '↺ ') + fmtDur(m.resetSec) : '';
     scr.text(x, y, padR(clip(rst, L.resetW), L.resetW), C.faint);
     return;
   }
@@ -167,7 +167,9 @@ function drawMeter(scr, y, m, L, cfg, blinkOn, isWorst, bites, t) {
     scr.text(x, y, padR(clip(figs, L.figsW), L.figsW), C.dim);
     x += L.figsW + 1;
   }
-  const reset = m.resetText != null ? m.resetText : (m.resetSec != null ? '↺ ' + fmtDur(m.resetSec) : '');
+  // ↺ = the reset time Anthropic gave us, ≈ = derived from the active block here
+  const reset = m.resetText != null ? m.resetText
+    : (m.resetSec != null ? (m.resetEst ? '≈ ' : '↺ ') + fmtDur(m.resetSec) : '');
   scr.text(x, y, padR(clip(reset, L.resetW), L.resetW), C.faint);
   if (isWorst && pct >= cfg.panic && blinkOn) scr.text(Math.min(scr.cols - 2, x + L.resetW), y, '◀', C.red, null, A_BOLD);
 }

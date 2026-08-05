@@ -570,12 +570,18 @@ class DataStore {
       a.cost += e.cost; a.val += entryMetric(e, metric); if (e.side) a.side++;
     };
 
-    // 5-hour blocks (anchored to the whole UTC hour of the first message, ccusage style)
+    // 5-hour blocks, anchored on the first message of the block — its exact
+    // timestamp, not the whole hour ccusage rounds down to. Anthropic's own
+    // `resets_at` gives the rule away: it carries that message's milliseconds
+    // (…20:30:00.332), so the window is not aligned to anything. Checked against
+    // the resets visible in the app's history: exact anchoring lands 4-11 min
+    // late (the app samples every 5 min, so the observed drop is late too),
+    // hour flooring scattered from 2 to 48 min early.
     const blocks = [];
     let cur = null;
     for (const e of es) {
       if (!cur || e.ts >= cur.end || e.ts - cur.lastTs > H5) {
-        const start = Math.floor(e.ts / 3600000) * 3600000;
+        const start = e.ts;
         cur = { start, end: start + H5, lastTs: e.ts, sum: zero() };
         blocks.push(cur);
       }
@@ -789,6 +795,16 @@ class DataStore {
       key, label, used, tokens, limit: null, auto: false, official: false,
       pct: null, resetSec, resetText: null,
     });
+    // The 5-hour reset only ever comes from the API. Once the token expires that
+    // reading ages past its own reset and gets dropped, while the weekly ones —
+    // days away — stay valid: SESSION lost its countdown and WEEK kept its.
+    // Fallback: the active block ends 5 h after its first message (see the
+    // anchoring above), which the transcripts give us. Marked ≈, because they
+    // only see Claude Code: a window opened by the desktop app or another
+    // machine looks like it started later than it did, so the estimate errs on
+    // the generous side.
+    const est5 = !reset5 && active && active.end > now ? active.end : 0;
+    const rs5 = reset5 ? (reset5 - now) / 1000 : (est5 ? (est5 - now) / 1000 : null);
     const estBlockVal = active ? active.sum.val : 0;
     const estBlockCost = active ? active.sum.cost : 0;
     const estBlockTok = active ? active.sum.i + active.sum.o + active.sum.cw + active.sum.cr : 0;
@@ -817,10 +833,11 @@ class DataStore {
     }
     if (off5) {
       push('session', 'SESSION 5h', estBlockVal, estBlockCost, estBlockTok, null,
-        reset5 ? (reset5 - now) / 1000 : null, null, { pct: ex5 != null ? ex5 : off.u5h * 100 });
+        rs5, null, { pct: ex5 != null ? ex5 : off.u5h * 100 });
     } else {
-      unknown('session', 'SESSION 5h', estBlockVal, estBlockTok, reset5 ? (reset5 - now) / 1000 : null);
+      unknown('session', 'SESSION 5h', estBlockVal, estBlockTok, rs5);
     }
+    if (est5) meters[meters.length - 1].resetEst = true;
     const weekTok = week.i + week.o + week.cw + week.cr;
     if (off7) {
       push('week', 'WEEK', week.val, week.cost, weekTok, null,

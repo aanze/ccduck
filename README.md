@@ -4,7 +4,7 @@ Your Claude Code limits as live gauges in the terminal — with a pixel-art duck
 living its own life underneath them and panicking when you get close.
 
 ```
- CCDUCK  v2.9.0 Claude tokens                             21:34:07 · usage 2min
+ CCDUCK  v2.9.1 Claude tokens                             21:34:07 · usage 2min
  ─────────────────────────────────────────────────────────────────────────────
  SESSION 5h ████████████████████▊·············  46% • $137 · 118M      ↺ 3h10
  WEEK       ███████████████████████████·······  60% • $870 · 791M      ↺ 2d13h
@@ -12,8 +12,9 @@ living its own life underneath them and panicking when you get close.
 ```
 
 Official `/usage` percentages when they are reachable (`•`), estimates otherwise (`≈`),
-`—` when nothing reliable is available: it never invents a number. Plus what `/usage` does
-not give you — cost, tokens, burn rate, end-of-block projection, per-model table.
+`—` when nothing reliable is available: it never invents a number. Same marks on the reset
+times, `↺` official and `≈` derived locally. Plus what `/usage` does not give you — cost,
+tokens, burn rate, end-of-block projection, per-model table.
 
 Nothing to connect, no API key: everything is read from files Claude Code already keeps on
 your machine. Zero dependencies, Node ≥ 18, built for a 56-column panel.
