@@ -854,7 +854,10 @@ class DataStore {
         official: !premEstimated, pct: offPrem.pct * 100,
         resetSec: (offPrem.reset - now) / 1000, resetText: null,
       });
-    } else if (off7 && roll.totCost > 0) {
+    } else if (off7 && (roll.totCost > 0 || off.u7d === 0)) {
+      // A weekly officially at 0 % settles it without the transcripts: the bucket
+      // is a subset of it. Back from a month away, the rolling week held nothing
+      // and this gauge sat on "—" for a value that was known.
       // No fresh reading of the bucket: the cccat formula, in weighted cost (a
       // Fable token weighs ~2x an Opus token in the quota). It reads the model
       // mix off the transcripts, so it follows a switch of model straight away.
@@ -867,7 +870,7 @@ class DataStore {
       // premium. The formula gave 11.3 %. The same rule of three had already
       // been caught overshooting the other way (100 % shown for a real 86 %).
       const share = cfg.premiumShare > 0 ? cfg.premiumShare : 0.5;
-      const pct = Math.min(100, ((roll.premCost / roll.totCost) * off.u7d / share) * 100);
+      const pct = off.u7d === 0 ? 0 : Math.min(100, ((roll.premCost / roll.totCost) * off.u7d / share) * 100);
       meters.push({
         key: 'premium', label: premiumFam.toUpperCase() + ' 7d',
         used: premium.val, tokens: premTok, limit: null, auto: true, official: false,
