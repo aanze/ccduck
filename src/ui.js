@@ -383,10 +383,12 @@ function draw(scr, state) {
   // gauges carry, so that is the freshness worth showing
   // The Claude app samples every 5 min: an age under 8 min is normal.
   const usageAge = snap.officialAt ? Math.round((Date.now() - snap.officialAt) / 1000) : null;
-  const stale = usageAge == null || usageAge > 8 * 60;
+  // Live = a fresh reading. Otherwise the age is the estimate's anchor age: shown
+  // in orange so drift is visible, but no ⚠ — nothing is broken and there is
+  // nothing for the user to fix, the gauges just read ≈ instead of •.
   const right = fmtClock(new Date())
-    + (usageAge != null ? ' · usage ' + fmtDur(usageAge) + (stale ? ' ⚠' : '') : '');
-  scr.text(cols - right.length - 1, y, right, stale ? C.orange : C.faint);
+    + (usageAge != null ? ' · usage ' + fmtDur(usageAge) : '');
+  scr.text(cols - right.length - 1, y, right, snap.officialLive ? C.faint : C.orange);
   y++;
   scr.hline(y++, 0, cols - 1, '─', C.faint);
 
@@ -508,9 +510,12 @@ function draw(scr, state) {
       + ' [z]alerts:' + (cfg.alerts === false ? 'off' : 'on')
       + ' [a]uth:' + (cfg.autoReauth ? 'auto' : 'off') + (ui.paused ? ' ▮▮' : '');
     const bits = [];
-    // the source actually kept: app (local Claude file), api, or VS Code cache
-    if (snap.officialUsed) bits.push('• src:' + (snap.officialSrc || '?'));
-    else bits.push('no official data — run: ccduck --debug-usage');
+    // the source actually kept: app (local Claude file), api, or VS Code cache.
+    // • when it is fresh, ≈ with its age when the gauges are extrapolated from it.
+    const anchorAge = snap.officialAt ? Math.round((Date.now() - snap.officialAt) / 60000) : null;
+    if (snap.officialUsed && snap.officialLive) bits.push('• src:' + (snap.officialSrc || '?'));
+    else if (snap.officialUsed) bits.push('≈ src:' + (snap.officialSrc || '?') + (anchorAge != null ? ' (' + anchorAge + 'min)' : ''));
+    else bits.push('no usage source — start the Claude app or run: ccduck --debug-usage');
     if (!snap.planSeen) bits.push('app file: ' + (snap.planErr || 'not found'));
     if (snap.meters.some((m) => m.auto)) bits.push('≈ auto (' + cfg.historyDays + 'd)');
     else if (!snap.officialUsed) bits.push('limits: config');

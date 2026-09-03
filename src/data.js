@@ -604,14 +604,19 @@ class DataStore {
     if (planRaw && planRaw.at) this.planCache = planRaw;
     const plan = (planRaw && planRaw.at) ? planRaw : (this.planCache || null);
     const planErr = plan ? null : ((planRaw && planRaw.error) || 'not found');
-    // A reading is valid while its window is still running, or when it is very
-    // recent (the app samples carry no reset time).
-    // Hard rule: a reading older than 15 min is NO LONGER considered official.
-    // Better to fall back honestly to an ≈ estimate than to show a stale figure
-    // with an "official" dot — that is what used to freeze the gauges.
+    // A reading counts as official (•) for 15 min. Older, it is not thrown away
+    // any more: it becomes the anchor of an estimate (≈), carried forward from
+    // the consumption the transcripts show since (see the anchoring below).
+    // The Claude app writes its file on a schedule of its own — 5 min most
+    // days, 15 today, once a 96-minute hole with the app open and in use — and
+    // the API needs a token that dies after a month away. Dropping every
+    // reading past 15 min left the gauges on "—" for hours with the app
+    // running: nothing to act on, and nothing the user should have to fix by
+    // hand. The one hard veto stays: a reading whose own window has ended
+    // (api and vscode carry the reset) is void.
     const MAXAGE = 15 * 60 * 1000;
     const collect = (src, pct, reset, at) =>
-      (pct != null && at && now - at < MAXAGE && (!reset || reset > now))
+      (pct != null && at && (!reset || reset > now))
         ? [{ src, pct, reset: reset || 0, at }] : [];
     const best = (arr) => arr.sort((a, b) => b.at - a.at)[0] || null;
 
@@ -638,8 +643,10 @@ class DataStore {
       }
       return dCost > 0 ? dPct / dCost : 0;        // percentage points per equivalent dollar
     };
+    // Carries an anchor forward. Any source: the factor only needs the app
+    // history to exist, not to be the anchor.
     const extrapolate = (sel, field) => {
-      if (!sel || sel.src !== 'app' || !plan || !plan.samples) return null;
+      if (!sel || !plan || !plan.samples) return null;
       const factor = calibrate(plan.samples, field);
       if (!factor) return null;
       const since = costBetween(sel.at, now);
@@ -676,30 +683,73 @@ class DataStore {
         premEstimated = true;
       }
     }
+    // Anchoring. A reading is worth what its window is worth: the 5-hour
+    // counter read in a previous block says nothing about this one. So a
+    // reading that predates its window — the active block from the transcripts
+    // for the session, the weekly window below for the week — is replaced by
+    // the one thing known for certain: the counter was at 0 when the window
+    // opened. From there the transcripts fill in, marked ≈. A reading older
+    // than its own window length is void for the same reason. Readings that
+    // carry a reset (api, vscode) are exempt from the block check: their window
+    // is still running by the server's own word, and a transcript block that
+    // starts later only means this machine missed the first message.
+    const fresh = (s) => !!s && now - s.at < MAXAGE;
+    let a5 = s5;
+    if (a5 && (now - a5.at >= H5 || (active && !a5.reset && a5.at < active.start))) {
+      a5 = { src: 'block', pct: 0, reset: 0, at: active ? active.start : now };
+    }
+    // The weekly window. Its reset only ever comes from the API and, like the
+    // 5-hour block, it opens on the first message after the previous window
+    // ended (resets_at carries that message's milliseconds). So from the last
+    // reset the API gave — even one long past — the transcripts step it
+    // forward: each window ends 7 days after the first message that follows.
+    // The app's history vetoes a derivation it contradicts: a weekly already
+    // above 0 between the old window's end and the derived opening means the
+    // window opened earlier, on usage this machine never saw — and no reset
+    // beats a wrong one.
+    let weekReset = reset7, weekResetEst = false;
+    if (!weekReset && api7 && api7.reset) {
+      let r = api7.reset, prevEnd = 0;
+      while (r && r <= now) {
+        prevEnd = r;
+        const first = es.find((e) => e.ts > r);
+        r = first ? first.ts + D7 : 0;
+      }
+      if (r) {
+        const opened = r - D7;
+        const contradicted = !!(plan && plan.samples && plan.samples.some((x) =>
+          x.t > prevEnd && x.t < opened && typeof x.sd === 'number' && x.sd > 0));
+        if (!contradicted) { weekReset = r; weekResetEst = true; }
+      }
+    }
+    let a7 = s7;
+    if (a7 && (now - a7.at >= D7 || (weekReset && !a7.reset && a7.at < weekReset - D7))) {
+      a7 = { src: 'window', pct: 0, reset: 0, at: weekReset ? weekReset - D7 : now };
+    }
     const off = {
-      u5h: s5 ? s5.pct : null, reset5h: reset5,
-      u7d: s7 ? s7.pct : null, reset7d: reset7,
+      u5h: a5 ? a5.pct : null, reset5h: reset5,
+      u7d: a7 ? a7.pct : null, reset7d: weekReset,
       at: Math.max(s5 ? s5.at : 0, s7 ? s7.at : 0),
     };
     const off5 = off.u5h != null;
     const off7 = off.u7d != null;
+    // • only for a fresh reading standing as its own anchor; everything else ≈
+    const live5 = fresh(s5) && a5 === s5, live7 = fresh(s7) && a7 === s7;
 
     // Day / week windows
     const midnight = new Date(now); midnight.setHours(0, 0, 0, 0);
     const dayStart = midnight.getTime();
-    let weekStart, weekReset = null;
-    if (off7 && off.reset7d > now) {
-      // official weekly window
-      weekStart = off.reset7d - D7;
-      weekReset = off.reset7d;
+    let weekStart;
+    if (weekReset) {
+      // official, or derived above
+      weekStart = weekReset - D7;
     } else if (cfg.weeklyReset && typeof cfg.weeklyReset.weekday === 'number') {
       const d = new Date(now);
       d.setHours(cfg.weeklyReset.hour || 0, 0, 0, 0);
       let delta = (d.getDay() - cfg.weeklyReset.weekday + 7) % 7;
       d.setDate(d.getDate() - delta);
       if (d.getTime() > now) d.setDate(d.getDate() - 7);
-      weekStart = d.getTime();
-      weekReset = weekStart + 7 * 86400 * 1000;
+      weekStart = d.getTime();     // declared in the config: aggregation only, never displayed
     } else {
       weekStart = now - 7 * 86400 * 1000;
     }
@@ -808,7 +858,7 @@ class DataStore {
     const estBlockVal = active ? active.sum.val : 0;
     const estBlockCost = active ? active.sum.cost : 0;
     const estBlockTok = active ? active.sum.i + active.sum.o + active.sum.cw + active.sum.cr : 0;
-    const ex5 = extrapolate(s5, 'fh'), ex7 = extrapolate(s7, 'sd');
+    const ex5 = extrapolate(a5, 'fh'), ex7 = extrapolate(a7, 'sd');
 
     // Premium cost consumed between two instants (local transcripts).
     const premCostBetween = (t0, t1) => {
@@ -831,20 +881,31 @@ class DataStore {
     if (!offPrem && od.premium && od.premium.reset > now && od.premium.pct > 0 && od.fetchedAt > 0) {
       anchorPrem = od.premium.pct * 100;
     }
-    if (off5) {
-      push('session', 'SESSION 5h', estBlockVal, estBlockCost, estBlockTok, null,
-        rs5, null, { pct: ex5 != null ? ex5 : off.u5h * 100 });
+    // An anchored estimate: a known percentage, but not a fresh reading
+    const est = (key, label, used, tokens, pct, resetSec) => meters.push({
+      key, label, used, tokens, limit: null, auto: true, official: false,
+      pct, resetSec, resetText: null,
+    });
+    const pct5 = off5 ? (ex5 != null ? ex5 : off.u5h * 100) : null;
+    if (off5 && live5) {
+      push('session', 'SESSION 5h', estBlockVal, estBlockCost, estBlockTok, null, rs5, null, { pct: pct5 });
+    } else if (off5) {
+      est('session', 'SESSION 5h', estBlockVal, estBlockTok, pct5, rs5);
     } else {
       unknown('session', 'SESSION 5h', estBlockVal, estBlockTok, rs5);
     }
     if (est5) meters[meters.length - 1].resetEst = true;
     const weekTok = week.i + week.o + week.cw + week.cr;
-    if (off7) {
-      push('week', 'WEEK', week.val, week.cost, weekTok, null,
-        reset7 ? (reset7 - now) / 1000 : null, null, { pct: ex7 != null ? ex7 : off.u7d * 100 });
+    const rs7 = weekReset ? (weekReset - now) / 1000 : null;
+    const w7 = off7 ? (ex7 != null ? ex7 : off.u7d * 100) : null;
+    if (off7 && live7) {
+      push('week', 'WEEK', week.val, week.cost, weekTok, null, rs7, null, { pct: w7 });
+    } else if (off7) {
+      est('week', 'WEEK', week.val, weekTok, w7, rs7);
     } else {
-      unknown('week', 'WEEK', week.val, weekTok, reset7 ? (reset7 - now) / 1000 : null);
+      unknown('week', 'WEEK', week.val, weekTok, rs7);
     }
+    if (weekResetEst) meters[meters.length - 1].resetEst = true;
     const premTok = premium.i + premium.o + premium.cw + premium.cr;
     if (offPrem) {
       // official weekly_scoped bucket (Fable/Opus) — the real /usage value
@@ -854,7 +915,7 @@ class DataStore {
         official: !premEstimated, pct: offPrem.pct * 100,
         resetSec: (offPrem.reset - now) / 1000, resetText: null,
       });
-    } else if (off7 && (roll.totCost > 0 || off.u7d === 0)) {
+    } else if (off7 && (roll.totCost > 0 || w7 === 0)) {
       // A weekly officially at 0 % settles it without the transcripts: the bucket
       // is a subset of it. Back from a month away, the rolling week held nothing
       // and this gauge sat on "—" for a value that was known.
@@ -870,11 +931,11 @@ class DataStore {
       // premium. The formula gave 11.3 %. The same rule of three had already
       // been caught overshooting the other way (100 % shown for a real 86 %).
       const share = cfg.premiumShare > 0 ? cfg.premiumShare : 0.5;
-      const pct = off.u7d === 0 ? 0 : Math.min(100, ((roll.premCost / roll.totCost) * off.u7d / share) * 100);
+      const pct = w7 === 0 ? 0 : Math.min(100, ((roll.premCost / roll.totCost) * (w7 / 100) / share) * 100);
       meters.push({
         key: 'premium', label: premiumFam.toUpperCase() + ' 7d',
         used: premium.val, tokens: premTok, limit: null, auto: true, official: false,
-        pct, resetSec: reset7 ? (reset7 - now) / 1000 : null, resetText: null,
+        pct, resetSec: rs7, resetText: null, resetEst: weekResetEst,
       });
     } else if (anchorPrem != null) {
       // Last resort, with no transcripts to read a mix off: the last official
@@ -882,7 +943,7 @@ class DataStore {
       meters.push({
         key: 'premium', label: premiumFam.toUpperCase() + ' 7d',
         used: premium.val, tokens: premTok, limit: null, auto: true, official: false,
-        pct: anchorPrem, resetSec: reset7 ? (reset7 - now) / 1000 : null, resetText: null,
+        pct: anchorPrem, resetSec: rs7, resetText: null, resetEst: weekResetEst,
       });
     } else {
       unknown('premium', premiumFam.toUpperCase() + ' 7d', premium.val, premTok,
@@ -896,8 +957,8 @@ class DataStore {
     let projPct = null;
     const sess = meters[0];
     if (active) {
-      const remainMin = ((off5 ? off.reset5h : active.end) - now) / 60000;
-      if (sess.official && estBlockCost > 0) {
+      const remainMin = ((reset5 || est5 || active.end) - now) / 60000;
+      if (sess.pct != null && estBlockCost > 0) {
         // rule of three on the official percentage, at the current spend rate
         projPct = sess.pct * (1 + (burnCostPerMin * Math.max(0, remainMin)) / estBlockCost);
       } else if (!sess.official && sess.limit > 0) {
@@ -934,6 +995,9 @@ class DataStore {
       planSeen: !!plan,
       planErr,
       officialUsed: off5 || off7 || !!offPrem,
+      // live = a reading fresh enough to stand on its own (•). Otherwise the
+      // gauges are shown, but as an estimate anchored on the last reading (≈).
+      officialLive: live5 || live7 || (!!offPrem && fresh({ at: od.fetchedAt })),
       officialErr: od.lastErr,
       officialRetryIn: Math.max(0, od.nextTryAt - now),
       entryCount: this.entries.size,
