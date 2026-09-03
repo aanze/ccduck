@@ -242,7 +242,7 @@ function readPlanUsage(env, cfg) {
       if (u5 == null && u7 == null) { why = why || 'no fh/sd'; continue; }
       const at = Number(last.t) || 0;
       if (best && at <= best.at) continue;
-      // we keep the recent history: it calibrates the extrapolation
+      // the recent history stays available: the weekly-window derivation checks it
       const hist = arr.slice(-40).map((s) => ({ t: Number(s.t) || 0, fh: s.u && s.u.fh, sd: s.u && s.u.sd }));
       best = { u5h: u5, u7d: u7, at, path: p, samples: hist };
     } catch (e) {

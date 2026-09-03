@@ -512,7 +512,7 @@ function draw(scr, state) {
       + ' [a]uth:' + (cfg.autoReauth ? 'auto' : 'off') + (ui.paused ? ' ▮▮' : '');
     const bits = [];
     // the source actually kept: app (local Claude file), api, or VS Code cache.
-    // • when it is fresh, ≈ with its age when the gauges are extrapolated from it.
+    // • when it is fresh, ≈ with its age when the gauges show it as last read.
     const anchorAge = snap.officialAt ? Math.round((Date.now() - snap.officialAt) / 60000) : null;
     if (snap.officialUsed && snap.officialLive) bits.push('• src:' + (snap.officialSrc || '?'));
     else if (snap.officialUsed) bits.push('≈ src:' + (snap.officialSrc || '?') + (anchorAge != null ? ' (' + anchorAge + 'min)' : ''));
