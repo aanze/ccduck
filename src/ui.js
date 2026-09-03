@@ -474,7 +474,10 @@ function draw(scr, state) {
     if (dy < rows - 1) {
       scr.text(2, dy, 'oauth token: ' + snap.diag.token + (snap.diag.apiErr ? '  ·  api: ' + snap.diag.apiErr : ''), C.dim);
     }
-    return geoOut(geo);
+    // no early return here: the footer below still has to be drawn. This
+    // branch used to call a helper that never existed, and nobody noticed for
+    // months because it only runs with NO source at all — the app closed and
+    // the token dead — and then it crashed on the first frame.
   } else if (!snap.hasData) {
     scr.text(1, y, 'no Claude Code data found in ~/.claude/projects', C.orange);
   } else {
@@ -489,7 +492,7 @@ function draw(scr, state) {
   y++;
 
   // ---- per-model table ----
-  if (tableRows > 0 && !ui.loading) {
+  if (tableRows > 0 && !ui.loading && !snap.diag) {   // the diagnosis uses those rows
     drawTable(scr, y, snap, cols, famCount);
     y += tableRows;
   }
