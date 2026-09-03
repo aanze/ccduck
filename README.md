@@ -4,7 +4,7 @@ Your Claude Code limits as live gauges in the terminal — with a pixel-art duck
 living its own life underneath them and panicking when you get close.
 
 ```
- CCDUCK  v2.9.7 Claude tokens                             21:34:07 · usage 2min
+ CCDUCK  v2.9.8 Claude tokens                             21:34:07 · usage 2min
  ─────────────────────────────────────────────────────────────────────────────
  SESSION 5h ████████████████████▊·············  46% • $137 · 118M      ↺ 3h10
  WEEK       ███████████████████████████·······  60% • $870 · 791M      ↺ 2d13h
@@ -160,7 +160,7 @@ prints that diagnosis on screen instead of the stats line.
 |---|---|
 | `—` on every gauge | no source has *ever* answered on this machine: the shell cannot see the app's folder (MSIX) and no token was found. Set `planUsageDir` or `CCDUCK_CLAUDE_DIR`, or run `--mirror-watch` from a shell that can |
 | `usage 40min` orange, gauges `≈` | the app has not written for a while: the figures are its last reading, as read. Back to `•` on its next sample |
-| `SESSION —` with `last reading … its block has ended` | the Claude app only samples while its chat is in use, and no token is valid: nothing on this machine knows the current block. A valid token (`claude auth login`, once) brings live figures back |
+| `Claude app is open but stopped recording usage at …` | since the app's 03/09/2026 update its usage poller pauses on a remote flag (it only polls for a few hours after its *tray* quick window was opened — the in-app usage panel does not count). Nothing on this machine records usage then. A valid token (`claude auth login`, once; `autoReauth` keeps it alive) is the only live source |
 | `token expired` | normal every ~8 h; the gauges stay right without it. `a` renews it yourself |
 | `rate-limited (retry Xmin)` | server-imposed delay, counted per outgoing IP. Don't push, it clears |
 | `tls …` | corporate proxy: `NODE_OPTIONS=--use-system-ca`, or point `NODE_EXTRA_CA_CERTS` at the internal CA |

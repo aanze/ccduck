@@ -314,6 +314,23 @@ class DataStore {
     this.official = loadOfficialState();
   }
 
+  // Newest write among the top-level files of the folder holding the app's
+  // usage file — the app's liveness, cheaply. Cached 30 s.
+  appAliveAround(planPath, now) {
+    const dir = path.dirname(planPath);
+    const c = this.appAliveCache;
+    if (c && c.dir === dir && now - c.checkedAt < 30000) return c.at;
+    let at = 0;
+    try {
+      for (const ent of fs.readdirSync(dir, { withFileTypes: true })) {
+        if (!ent.isFile() || ent.name === path.basename(planPath)) continue;
+        try { at = Math.max(at, fs.statSync(path.join(dir, ent.name)).mtimeMs); } catch (e) { /* gone */ }
+      }
+    } catch (e) { /* folder unreadable: unknown */ }
+    this.appAliveCache = { dir, at, checkedAt: now };
+    return at;
+  }
+
   // Renewing the token ourselves — only when the mode is armed (config
   // `autoReauth` or the `a` key). One attempt per minute at most, and we give
   // up for good once the refresh token is dead: only `claude auth login` fixes
@@ -604,6 +621,13 @@ class DataStore {
     if (planRaw && planRaw.at) this.planCache = planRaw;
     const plan = (planRaw && planRaw.at) ? planRaw : (this.planCache || null);
     const planErr = plan ? null : ((planRaw && planRaw.error) || 'not found');
+    // Is the Claude app open while its usage file sits still? Its profile
+    // folder (config.json, Preferences…) is written every few minutes while it
+    // runs. A fresh folder next to a stale usage file means the app's own
+    // usage poller is paused — seen after the 03/09/2026 update (v1.44121):
+    // the file froze for hours with the app open and in use. Worth saying on
+    // screen, because from the outside it looks like ccduck stopped reading.
+    const appAliveAt = plan && plan.path ? this.appAliveAround(plan.path, now) : 0;
     // A reading counts as official (•) for 15 min. Older, it is not thrown away
     // any more: it becomes the anchor of an estimate (≈), carried forward from
     // the consumption the transcripts show since (see the anchoring below).
@@ -714,6 +738,12 @@ class DataStore {
     const off7 = off.u7d != null;
     // • only for a fresh reading standing as its own anchor; everything else ≈
     const live5 = fresh(s5) && a5 === s5, live7 = fresh(s7) && a7 === s7;
+    let appNote = null;
+    if (!live5 && plan && plan.at && now - plan.at > 20 * 60 * 1000 && appAliveAt > now - 5 * 60 * 1000) {
+      const hhmm = new Date(plan.at).toTimeString().slice(0, 5);
+      appNote = 'Claude app is open but stopped recording usage at ' + hhmm
+        + ' (its own poll is paused) — live figures need a valid token';
+    }
 
     // Day / week windows
     const midnight = new Date(now); midnight.setHours(0, 0, 0, 0);
@@ -970,8 +1000,9 @@ class DataStore {
         return { files: lines, token: tok, apiErr: od.lastErr || null };
       })(),
       officialSrc: s5 ? s5.src : (s7 ? s7.src : null),
-      // why a gauge reads '—' while a source exists: its reading's window ended
-      staleNote: why5 || why7 || null,
+      // why a gauge reads '—' or ≈ while a source exists: its reading's window
+      // ended, and/or the app is open but no longer recording
+      staleNote: [why5 || why7, appNote].filter(Boolean).join('  ·  ') || null,
       planSeen: !!plan,
       planErr,
       officialUsed: off5 || off7 || !!offPrem,
