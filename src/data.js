@@ -620,39 +620,14 @@ class DataStore {
         ? [{ src, pct, reset: reset || 0, at }] : [];
     const best = (arr) => arr.sort((a, b) => b.at - a.at)[0] || null;
 
-    // The app only samples every 5 min: between two readings the displayed
-    // counter lags by that much. We fill the gap with the consumption actually
-    // seen in the transcripts, converted into percentage points through a factor
-    // calibrated on the app history itself (nothing invented: measured Δ% / Δcost).
-    const costBetween = (t0, t1) => {
-      let c = 0;
-      for (const e of es) if (e.ts > t0 && e.ts <= t1) c += e.cost;
-      return c;
-    };
-    const calibrate = (samples, field) => {
-      if (!Array.isArray(samples) || samples.length < 3) return 0;
-      let dPct = 0, dCost = 0;
-      for (let i = 1; i < samples.length; i++) {
-        const a = samples[i - 1], b = samples[i];
-        if (typeof a[field] !== 'number' || typeof b[field] !== 'number') continue;
-        const dp = b[field] - a[field];
-        if (dp <= 0) continue;                    // window reset or plateau: ignore
-        const dc = costBetween(a.t, b.t);
-        if (dc <= 0) continue;
-        dPct += dp; dCost += dc;
-      }
-      return dCost > 0 ? dPct / dCost : 0;        // percentage points per equivalent dollar
-    };
-    // Carries an anchor forward. Any source: the factor only needs the app
-    // history to exist, not to be the anchor.
-    const extrapolate = (sel, field) => {
-      if (!sel || !plan || !plan.samples) return null;
-      const factor = calibrate(plan.samples, field);
-      if (!factor) return null;
-      const since = costBetween(sel.at, now);
-      if (since <= 0) return null;
-      return Math.min(100, sel.pct * 100 + since * factor);
-    };
+    // No extrapolation from the transcripts, ever. It was tried — a factor in
+    // percentage points per dollar, calibrated on the app's own sample pairs —
+    // and it looked right on small contexts. Measured on a long session with a
+    // huge context: calibrated 1.26 pt/$, real 0.095. Thirteen times off, and
+    // no weighting of input, output, cache write or cache read fits both
+    // regimes (six tried, all 5 to 25x too high). Whatever the quota counts,
+    // it is not what the transcripts measure, so a reading is shown as it was
+    // read, with its age — never moved.
     const api5 = od.data && od.data.five_hour, api7 = od.data && od.data.seven_day;
     const s5 = best([
       ...collect('api', api5 && api5.pct, api5 && api5.reset, od.fetchedAt),
@@ -686,17 +661,20 @@ class DataStore {
     // Anchoring. A reading is worth what its window is worth: the 5-hour
     // counter read in a previous block says nothing about this one. So a
     // reading that predates its window — the active block from the transcripts
-    // for the session, the weekly window below for the week — is replaced by
-    // the one thing known for certain: the counter was at 0 when the window
-    // opened. From there the transcripts fill in, marked ≈. A reading older
-    // than its own window length is void for the same reason. Readings that
+    // for the session, the weekly window below for the week — is void: its
+    // value is unknown, and unknown is shown as such. A reading older than its
+    // own window length is void for the same reason. Readings that
     // carry a reset (api, vscode) are exempt from the block check: their window
     // is still running by the server's own word, and a transcript block that
     // starts later only means this machine missed the first message.
     const fresh = (s) => !!s && now - s.at < MAXAGE;
-    let a5 = s5;
+    // A void reading is unknown — not 0. The counter was 0 when the window
+    // opened, but showing that as the current value would be the same lie as
+    // extrapolating, just in the other direction.
+    let a5 = s5, why5 = null;
     if (a5 && (now - a5.at >= H5 || (active && !a5.reset && a5.at < active.start))) {
-      a5 = { src: 'block', pct: 0, reset: 0, at: active ? active.start : now };
+      why5 = 'SESSION: last reading ' + Math.round((now - a5.at) / 60000) + 'min ago, its block has ended since';
+      a5 = null;
     }
     // The weekly window. Its reset only ever comes from the API and, like the
     // 5-hour block, it opens on the first message after the previous window
@@ -722,9 +700,10 @@ class DataStore {
         if (!contradicted) { weekReset = r; weekResetEst = true; }
       }
     }
-    let a7 = s7;
+    let a7 = s7, why7 = null;
     if (a7 && (now - a7.at >= D7 || (weekReset && !a7.reset && a7.at < weekReset - D7))) {
-      a7 = { src: 'window', pct: 0, reset: 0, at: weekReset ? weekReset - D7 : now };
+      why7 = 'WEEK: last reading ' + Math.round((now - a7.at) / 3600000) + 'h ago, its window has ended since';
+      a7 = null;
     }
     const off = {
       u5h: a5 ? a5.pct : null, reset5h: reset5,
@@ -858,7 +837,6 @@ class DataStore {
     const estBlockVal = active ? active.sum.val : 0;
     const estBlockCost = active ? active.sum.cost : 0;
     const estBlockTok = active ? active.sum.i + active.sum.o + active.sum.cw + active.sum.cr : 0;
-    const ex5 = extrapolate(a5, 'fh'), ex7 = extrapolate(a7, 'sd');
 
     // Premium cost consumed between two instants (local transcripts).
     const premCostBetween = (t0, t1) => {
@@ -886,7 +864,7 @@ class DataStore {
       key, label, used, tokens, limit: null, auto: true, official: false,
       pct, resetSec, resetText: null,
     });
-    const pct5 = off5 ? (ex5 != null ? ex5 : off.u5h * 100) : null;
+    const pct5 = off5 ? off.u5h * 100 : null;
     if (off5 && live5) {
       push('session', 'SESSION 5h', estBlockVal, estBlockCost, estBlockTok, null, rs5, null, { pct: pct5 });
     } else if (off5) {
@@ -897,7 +875,7 @@ class DataStore {
     if (est5) meters[meters.length - 1].resetEst = true;
     const weekTok = week.i + week.o + week.cw + week.cr;
     const rs7 = weekReset ? (weekReset - now) / 1000 : null;
-    const w7 = off7 ? (ex7 != null ? ex7 : off.u7d * 100) : null;
+    const w7 = off7 ? off.u7d * 100 : null;
     if (off7 && live7) {
       push('week', 'WEEK', week.val, week.cost, weekTok, null, rs7, null, { pct: w7 });
     } else if (off7) {
@@ -958,7 +936,7 @@ class DataStore {
     const sess = meters[0];
     if (active) {
       const remainMin = ((reset5 || est5 || active.end) - now) / 60000;
-      if (sess.pct != null && estBlockCost > 0) {
+      if (sess.official && estBlockCost > 0) {
         // rule of three on the official percentage, at the current spend rate
         projPct = sess.pct * (1 + (burnCostPerMin * Math.max(0, remainMin)) / estBlockCost);
       } else if (!sess.official && sess.limit > 0) {
@@ -991,7 +969,9 @@ class DataStore {
             ? 'expired ' + Math.round((now - cr.expiresAt) / 60000) + 'min ago' : 'valid');
         return { files: lines, token: tok, apiErr: od.lastErr || null };
       })(),
-      officialSrc: (s5 ? s5.src : (s7 ? s7.src : null)) + (ex5 != null || ex7 != null ? '+live' : ''),
+      officialSrc: s5 ? s5.src : (s7 ? s7.src : null),
+      // why a gauge reads '—' while a source exists: its reading's window ended
+      staleNote: why5 || why7 || null,
       planSeen: !!plan,
       planErr,
       officialUsed: off5 || off7 || !!offPrem,

@@ -464,7 +464,7 @@ function draw(scr, state) {
     scr.text(1, y, `scanning transcripts… ${ui.loading.done}/${ui.loading.total}`, C.dim);
   } else if (snap.diag) {
     // no official source: we show what THIS process sees, here and now
-    scr.text(1, y, 'no usage source reachable from this process:', C.orange, null, A_BOLD);
+    scr.text(1, y, 'no usable usage reading from this process:', C.orange, null, A_BOLD);
     let dy = y + 1;
     for (const f of snap.diag.files) {
       if (dy >= rows - 1) break;
@@ -484,6 +484,7 @@ function draw(scr, state) {
     scr.text(1, y, 'no Claude Code data found in ~/.claude/projects', C.orange);
   } else {
     const parts = [];
+    if (snap.staleNote) parts.push(snap.staleNote);   // why a gauge reads '—'
     parts.push('today ' + fmtMetric(snap.day.val, snap.metric));
     parts.push('burn ' + (snap.metric === 'cost' ? fmtCost(snap.burnPerMin * 60) + '/h' : fmtTok(snap.burnTokPerMin) + ' tok/min'));
     if (snap.metric === 'cost') parts.push(fmtTok(snap.burnTokPerMin) + ' tok/min');

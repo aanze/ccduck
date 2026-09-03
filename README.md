@@ -4,7 +4,7 @@ Your Claude Code limits as live gauges in the terminal — with a pixel-art duck
 living its own life underneath them and panicking when you get close.
 
 ```
- CCDUCK  v2.9.5 Claude tokens                             21:34:07 · usage 2min
+ CCDUCK  v2.9.6 Claude tokens                             21:34:07 · usage 2min
  ─────────────────────────────────────────────────────────────────────────────
  SESSION 5h ████████████████████▊·············  46% • $137 · 118M      ↺ 3h10
  WEEK       ███████████████████████████·······  60% • $870 · 791M      ↺ 2d13h
@@ -124,15 +124,15 @@ PowerShell has no `VAR=x cmd` prefix: `$env:CCDUCK_HUNGRY_SEC=20; cccat`, then
 
 ## Where the numbers come from
 
-Freshest reading wins, window by window — never a blend. A reading under 15 min old is shown
-as fact (`•`); an older one is not thrown away but becomes the anchor of an estimate (`≈`),
-carried forward from the consumption the transcripts show since. So the gauges keep a number
-whenever any source has *ever* answered — you never have to run an auth command by hand.
+Freshest reading wins, window by window — never a blend, never moved. A reading under 15 min
+old is shown as fact (`•`); an older one is shown as it was read, marked `≈`, with its age in
+the header. A reading whose window has ended since is void: `—`, and the stats line says why.
+Nothing is ever extrapolated from the transcripts — measured, that was off by 13×.
 
 1. **The Claude app's own reading**, written every 5 min: no token, no network, so no 401
    and no 429. Read from `%LOCALAPPDATA%\Packages\Claude_*\...` first, because the Windows
    app is packaged (MSIX) and `%APPDATA%\Claude` is a virtualised view another packaged
-   shell cannot see. The 5-minute gap is filled from the transcripts (`src:app+live`).
+   shell cannot see. Read as written: its 5-minute lag is shown, never papered over.
 2. **The `/usage` endpoint**, with the OAuth token already on the machine — the only source
    carrying the Fable bucket and the exact reset times. The `refreshToken` is never used by
    default: Anthropic rotates it, and using it can sign your Claude Code out.
@@ -159,7 +159,8 @@ prints that diagnosis on screen instead of the stats line.
 | Symptom | Fix |
 |---|---|
 | `—` on every gauge | no source has *ever* answered on this machine: the shell cannot see the app's folder (MSIX) and no token was found. Set `planUsageDir` or `CCDUCK_CLAUDE_DIR`, or run `--mirror-watch` from a shell that can |
-| `usage 40min` orange, gauges `≈` | normal: the app has not written for a while, so the figures are estimated from the last reading. They go back to `•` on the app's next sample |
+| `usage 40min` orange, gauges `≈` | the app has not written for a while: the figures are its last reading, as read. Back to `•` on its next sample |
+| `SESSION —` with `last reading … its block has ended` | the Claude app only samples while its chat is in use, and no token is valid: nothing on this machine knows the current block. A valid token (`claude auth login`, once) brings live figures back |
 | `token expired` | normal every ~8 h; the gauges stay right without it. `a` renews it yourself |
 | `rate-limited (retry Xmin)` | server-imposed delay, counted per outgoing IP. Don't push, it clears |
 | `tls …` | corporate proxy: `NODE_OPTIONS=--use-system-ca`, or point `NODE_EXTRA_CA_CERTS` at the internal CA |
